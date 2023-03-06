@@ -1,6 +1,9 @@
 package storage_lock
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type MongoStorage struct{}
 
@@ -27,6 +30,11 @@ func (x *MongoStorage) DeleteWithVersion(ctx context.Context, lockId string, exc
 }
 
 func (x *MongoStorage) Get(ctx context.Context, lockId string) (string, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (x *MongoStorage) GetTime(ctx context.Context) (time.Time, error) {
 	//TODO implement me
 	panic("implement me")
 }

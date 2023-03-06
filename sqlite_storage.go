@@ -2,6 +2,7 @@ package storage_lock
 
 import (
 	"context"
+	"time"
 )
 
 // ------------------------------------------------ ---------------------------------------------------------------------
@@ -36,6 +37,11 @@ func (x *SqliteStorage) DeleteWithVersion(ctx context.Context, lockId string, ex
 }
 
 func (x *SqliteStorage) Get(ctx context.Context, lockId string) (string, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (x *SqliteStorage) GetTime(ctx context.Context) (time.Time, error) {
 	//TODO implement me
 	panic("implement me")
 }

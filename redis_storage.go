@@ -2,6 +2,7 @@ package storage_lock
 
 import (
 	"context"
+	"time"
 )
 
 // ------------------------------------------------ ---------------------------------------------------------------------
@@ -46,6 +47,11 @@ func (x *RedisStorage) DeleteWithVersion(ctx context.Context, lockId string, exc
 }
 
 func (x *RedisStorage) Get(ctx context.Context, lockId string) (string, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (x *RedisStorage) GetTime(ctx context.Context) (time.Time, error) {
 	//TODO implement me
 	panic("implement me")
 }

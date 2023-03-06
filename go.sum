@@ -1,12 +1,10 @@
-github.com/golang-infrastructure/go-goroutine-id v0.0.0-20221218193551-761a923afeab h1:kJ2LZOE6x466xUlskOWdAgtOvequkMIq1RpCFFBi2X0=
-github.com/golang-infrastructure/go-goroutine-id v0.0.0-20221218193551-761a923afeab/go.mod h1:1L+eneS0HXUlZP0tmESGhlmpJ3hl063JGz6UQaJCmY0=
-github.com/golang-infrastructure/go-goroutine-id v0.0.0-20230106174832-a6a21dee011c h1:o5nwokO+xQvtzT21sgreCRd00r1lUGSPWDUfaXdhbBY=
-github.com/golang-infrastructure/go-goroutine-id v0.0.0-20230106174832-a6a21dee011c/go.mod h1:1L+eneS0HXUlZP0tmESGhlmpJ3hl063JGz6UQaJCmY0=
+github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/golang-infrastructure/go-goroutine-id v0.0.0-20230106175145-109121461a62 h1:Ehc1UpYN/sjHoElfH1nGHxnMZHIC+uEFPVjQtH1p7kA=
 github.com/golang-infrastructure/go-goroutine-id v0.0.0-20230106175145-109121461a62/go.mod h1:1L+eneS0HXUlZP0tmESGhlmpJ3hl063JGz6UQaJCmY0=
-github.com/golang-infrastructure/go-variable-parameter v0.0.1 h1:Jp55WoJWNY97zvKj0/qabUdtcWIG7yFCcUa26oFD8dc=
-github.com/golang-infrastructure/go-variable-parameter v0.0.1/go.mod h1:qEnCqgG04+EpGWqRXaNpKhu4JsP6xcT85WpJyS83Dcw=
 github.com/golang-infrastructure/go-variable-parameter v0.0.2-0.20230106180851-05f51aca553b h1:MWAWfJbYDPJdsv9P6dvG+k6uaxc3FrBl62kQamkZ038=
 github.com/golang-infrastructure/go-variable-parameter v0.0.2-0.20230106180851-05f51aca553b/go.mod h1:qEnCqgG04+EpGWqRXaNpKhu4JsP6xcT85WpJyS83Dcw=
 github.com/google/uuid v1.3.0 h1:t6JiXgmwXMjEs8VusXIJk2BXHsn+wx8BZdTaoZ5fu7I=
 github.com/google/uuid v1.3.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
+github.com/stretchr/testify v1.8.1 h1:w7B6lhMri9wdJUVmEZPGGhZzrYTPvgJArz7wNPgYKsk=
+gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
