@@ -1,19 +1,59 @@
 package storage_lock
 
-//import (
-//	"context"
-//	"sync/atomic"
-//	"time"
-//)
-//
-//// 存储锁的表是否已经存在了
-//var storageTableCreated = atomic.Bool{}
-//
-//type MySQLStorage struct {
-//	tableName string
-//}
-//
-//var _ Storage = &MySQLStorage{}
+import (
+	"context"
+	"sync/atomic"
+	"time"
+)
+
+// 存储锁的表是否已经存在了
+var storageTableCreated = atomic.Bool{}
+
+type MySQLStorage struct {
+	tableName string
+}
+
+var _ Storage = &MySQLStorage{}
+
+func NewMySQLStorage() *MySQLStorage {
+	return &MySQLStorage{}
+}
+
+func (x *MySQLStorage) Init(ctx context.Context) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (x *MySQLStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformationJsonString string) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (x *MySQLStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformationJsonString string) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (x *MySQLStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (x *MySQLStorage) Get(ctx context.Context, lockId string) (string, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (x *MySQLStorage) GetTime(ctx context.Context) (time.Time, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (x *MySQLStorage) Close(ctx context.Context) error {
+	//TODO implement me
+	panic("implement me")
+}
+
 //
 //func (x *MySQLStorage) UpdateWithVersion(ctx context.Context, lockId, exceptedValue, newValue string) error {
 //	updateSql := `UPDATE %s SET value = $1 WHERE key = $2 AND value = $3 `
@@ -70,9 +110,9 @@ package storage_lock
 //LeaseExpireTime: time.Now().Add(time.Minute * 10),
 //}
 //sql := `INSERT INTO selefra_meta_kv (
-//                             "key",
-//                             "value"
-//                             ) VALUES ( $1, $2 )`
+//                            "key",
+//                            "value"
+//                            ) VALUES ( $1, $2 )`
 //exec, err := x.pool.Exec(ctx, sql, lockKey, lockInformation.ToJsonString())
 //if err != nil || exec.RowsAffected() != 1 {
 //// storageLock failed

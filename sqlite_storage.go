@@ -16,7 +16,7 @@ type SqliteStorage struct{}
 
 var _ Storage = &SqliteStorage{}
 
-func (x *SqliteStorage) Init() error {
+func (x *SqliteStorage) Init(ctx context.Context) error {
 	//TODO implement me
 	panic("implement me")
 }
@@ -42,6 +42,11 @@ func (x *SqliteStorage) Get(ctx context.Context, lockId string) (string, error) 
 }
 
 func (x *SqliteStorage) GetTime(ctx context.Context) (time.Time, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (x *SqliteStorage) Close(ctx context.Context) error {
 	//TODO implement me
 	panic("implement me")
 }

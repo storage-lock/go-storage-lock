@@ -13,7 +13,7 @@ type Version uint64
 type Storage interface {
 
 	// Init 初始化操作，比如创建存储锁的表，需要支持多次调用，每次创建Storage的时候会调用此方法初始化
-	Init() error
+	Init(ctx context.Context) error
 
 	// UpdateWithVersion 如果存储的是指定版本的话，则将其更新
 	// lockId 表示锁的ID
@@ -33,4 +33,7 @@ type Storage interface {
 	// GetTime 分布式锁的话时间必须统一使用Storage的时间，所以Storage要能够提供时间查询的功能
 	// 这是因为分布式锁的算法需要根据时间来协调推进，而当时间不准确的时候算法可能会失效从而导致锁失效
 	GetTime(ctx context.Context) (time.Time, error)
+
+	// Close 关闭此存储介质
+	Close(ctx context.Context) error
 }

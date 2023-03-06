@@ -36,7 +36,7 @@ func NewMemoryStorage() *MemoryStorage {
 	}
 }
 
-func (x *MemoryStorage) Init() error {
+func (x *MemoryStorage) Init(ctx context.Context) error {
 	// 没有要初始化的，在创建的时候就初始化了
 	return nil
 }
@@ -102,6 +102,10 @@ func (x *MemoryStorage) DeleteWithVersion(ctx context.Context, lockId string, ex
 
 func (x *MemoryStorage) GetTime(ctx context.Context) (time.Time, error) {
 	return time.Now(), nil
+}
+
+func (x *MemoryStorage) Close(ctx context.Context) error {
+	return nil
 }
 
 // ------------------------------------------------ ---------------------------------------------------------------------
