@@ -82,6 +82,11 @@ func (x *LeaseRefreshGoroutine) refreshLeaseExpiredTime(ctx context.Context) err
 	}
 	lastVersion := information.Version
 	information.Version++
-	information.LeaseExpireTime = x.storageLock.options.nextLeaseExpireTime()
+
+	expireTime, err := x.storageLock.getLeaseExpireTime(ctx)
+	if err != nil {
+		return err
+	}
+	information.LeaseExpireTime = expireTime
 	return x.storageLock.storage.UpdateWithVersion(ctx, x.storageLock.options.LockId, lastVersion, information.Version, information.ToJsonString())
 }

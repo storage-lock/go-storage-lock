@@ -20,8 +20,13 @@ type MemoryStorage struct {
 
 var _ Storage = &MemoryStorage{}
 
-func NewStorageLockUseMemory() Storage {
-	return NewMemoryStorage()
+func NewStorageLockUseMemory(lockId string) *StorageLock {
+	return NewStorageLock(NewMemoryStorage(), &StorageLockOptions{
+		LockId:                lockId,
+		LeaseExpireAfter:      DefaultLeaseExpireAfter,
+		LeaseRefreshInterval:  DefaultLeaseRefreshInterval,
+		VersionMissRetryTimes: DefaultVersionMissRetryTimes,
+	})
 }
 
 func NewMemoryStorage() *MemoryStorage {
