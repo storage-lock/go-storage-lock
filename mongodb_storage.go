@@ -56,9 +56,12 @@ type MongoStorageOptions struct {
 // ------------------------------------------------ ---------------------------------------------------------------------
 
 type MongoStorage struct {
-	options    *MongoStorageOptions
+	options *MongoStorageOptions
+
 	client     *mongo.Client
 	collection *mongo.Collection
+
+	session mongo.Session
 }
 
 var _ Storage = &MongoStorage{}
@@ -80,11 +83,36 @@ func (x *MongoStorage) Init(ctx context.Context) error {
 		return nil
 	}
 	database.Collection("")
+
+	// 初始化
+	session, err := x.client.StartSession()
+	if err != nil {
+		return err
+	}
+	x.session = session
 }
 
 func (x *MongoStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformationJsonString string) error {
-	//TODO implement me
-	panic("implement me")
+	filter := bson.M{
+		"_id": bson.M{
+			"$eq": lockId,
+		},
+		"version": bson.M{
+			"$eq": exceptedVersion,
+		},
+	}
+	rs, err := x.collection.UpdateOne(ctx, filter, &MongoLock{
+		ID:             lockId,
+		Version:        newVersion,
+		LockJsonString: lockInformationJsonString,
+	})
+	if err != nil {
+		return err
+	}
+	if rs.ModifiedCount == 0 {
+		return ErrVersionMiss
+	}
+	return nil
 }
 
 func (x *MongoStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformationJsonString string) error {
@@ -107,12 +135,16 @@ func (x *MongoStorage) Get(ctx context.Context, lockId string) (string, error) {
 	if one.Err() != nil {
 		return "", one.Err()
 	}
-	one.Decode()
+	bytes, err := one.DecodeBytes()
+	if err != nil {
+		return "", err
+	}
+	return string(bytes), nil
 }
 
 func (x *MongoStorage) GetTime(ctx context.Context) (time.Time, error) {
-	//TODO implement me
-	panic("implement me")
+	x.session.ClusterTime()
+	return , nil
 }
 
 func (x *MongoStorage) Close(ctx context.Context) error {
@@ -121,3 +153,20 @@ func (x *MongoStorage) Close(ctx context.Context) error {
 	}
 	return nil
 }
+
+// ------------------------------------------------ ---------------------------------------------------------------------
+
+// MongoLock 表示Mongo中的一个锁信息
+type MongoLock struct {
+
+	// 锁的ID
+	ID string `bson:"_id"`
+
+	// 锁的版本
+	Version Version `bson:"version"`
+
+	// 锁的json
+	LockJsonString string `bson:"lock_json_string"`
+}
+
+// ------------------------------------------------ ---------------------------------------------------------------------
