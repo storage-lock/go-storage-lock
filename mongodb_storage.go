@@ -12,8 +12,11 @@ import (
 
 // MongoConfigurationConnectionGetter 根据URI连接Mongo服务器获取连接
 type MongoConfigurationConnectionGetter struct {
+
+	// 连接到数据库的选项
 	URI string
 
+	// Mongo客户端
 	client *mongo.Client
 }
 
@@ -116,13 +119,31 @@ func (x *MongoStorage) UpdateWithVersion(ctx context.Context, lockId string, exc
 }
 
 func (x *MongoStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformationJsonString string) error {
-	//TODO implement me
-	panic("implement me")
+	_, err := x.collection.InsertOne(ctx, &MongoLock{
+		ID:             lockId,
+		Version:        version,
+		LockJsonString: lockInformationJsonString,
+	})
+	return err
 }
 
 func (x *MongoStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version) error {
-	//TODO implement me
-	panic("implement me")
+	filter := bson.M{
+		"_id": bson.M{
+			"$eq": lockId,
+		},
+		"version": bson.M{
+			"$eq": exceptedVersion,
+		},
+	}
+	rs, err := x.collection.DeleteOne(ctx, filter)
+	if err != nil {
+		return err
+	}
+	if rs.DeletedCount == 0 {
+		return ErrVersionMiss
+	}
+	return nil
 }
 
 func (x *MongoStorage) Get(ctx context.Context, lockId string) (string, error) {
