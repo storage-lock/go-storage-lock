@@ -2,199 +2,240 @@ package storage_lock
 
 import (
 	"context"
-	"sync/atomic"
+	"database/sql"
+	"errors"
+	"fmt"
+	"sync"
 	"time"
 )
 
-// 存储锁的表是否已经存在了
-var storageTableCreated = atomic.Bool{}
+// ------------------------------------------------- --------------------------------------------------------------------
+
+// MySQLStorageConnectionGetter 创建一个MySQL的连接
+type MySQLStorageConnectionGetter struct {
+
+	// 主机的名字
+	Host string
+
+	// 主机的端口
+	Port uint
+
+	// 用户名
+	User string
+
+	// 密码
+	Passwd string
+
+	// DSN
+	// "root:@tcp(127.0.0.1:4000)/test?charset=utf8mb4"
+	DSN string
+
+	// 初始化好的数据库实例
+	db   *sql.DB
+	err  error
+	once sync.Once
+}
+
+var _ ConnectionGetter[*sql.DB] = &MySQLStorageConnectionGetter{}
+
+// NewMySQLStorageConnectionGetterFromDSN 从DSN创建MySQL连接
+func NewMySQLStorageConnectionGetterFromDSN(dsn string) *MySQLStorageConnectionGetter {
+	return &MySQLStorageConnectionGetter{
+		DSN: dsn,
+	}
+}
+
+// NewMySQLStorageConnectionGetter 从服务器属性创建数据库连接
+func NewMySQLStorageConnectionGetter(host string, port uint, user, passwd string) *MySQLStorageConnectionGetter {
+	return &MySQLStorageConnectionGetter{
+		Host:   host,
+		Port:   port,
+		User:   user,
+		Passwd: passwd,
+	}
+}
+
+// Get 获取到数据库的连接
+func (x *MySQLStorageConnectionGetter) Get(ctx context.Context) (*sql.DB, error) {
+	x.once.Do(func() {
+		db, err := sql.Open("mysql", x.DSN)
+		if err != nil {
+			x.err = err
+			return
+		}
+		x.db = db
+	})
+	return x.db, x.err
+}
+
+// ------------------------------------------------- --------------------------------------------------------------------
+
+const DefaultMySQLStorageTableName = "storage_lock"
+
+type MySQLStorageOptions struct {
+
+	// 锁存放在哪个数据库下
+	DatabaseName string
+
+	// 存放锁的表的名字
+	TableName string
+
+	// 用于获取数据库连接
+	ConnectionGetter ConnectionGetter[*sql.DB]
+}
+
+// ------------------------------------------------- --------------------------------------------------------------------
 
 type MySQLStorage struct {
-	tableName string
+	options *MySQLStorageOptions
+
+	db            *sql.DB
+	tableFullName string
 }
 
 var _ Storage = &MySQLStorage{}
 
-func NewMySQLStorage() *MySQLStorage {
-	return &MySQLStorage{}
+func NewMySQLStorage(options *MySQLStorageOptions) *MySQLStorage {
+	return &MySQLStorage{
+		options: options,
+	}
 }
 
 func (x *MySQLStorage) Init(ctx context.Context) error {
-	//TODO implement me
-	panic("implement me")
+	db, err := x.options.ConnectionGetter.Get(ctx)
+	if err != nil {
+		return err
+	}
+
+	// 如果设置了数据库的话需要切换数据库
+	if x.options.DatabaseName != "" {
+
+		// 如果数据库不存在的话则创建
+		createDatabaseSql := fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", x.options.DatabaseName)
+		_, err := db.ExecContext(ctx, createDatabaseSql)
+		if err != nil {
+			return err
+		}
+
+		// 切换到数据库
+		_, err = db.ExecContext(ctx, "USE "+x.options.DatabaseName)
+		if err != nil {
+			return err
+		}
+	}
+
+	// 创建存储锁信息需要的表
+	tableFullName := x.options.TableName
+	if tableFullName == "" {
+		tableFullName = DefaultTidbStorageTableName
+	}
+	if x.options.DatabaseName != "" {
+		tableFullName = fmt.Sprintf("`%s`.`%s`", x.options.DatabaseName, tableFullName)
+	} else {
+		tableFullName = fmt.Sprintf("`%s`", tableFullName)
+	}
+	createTableSql := `CREATE TABLE IF NOT EXISTS %s (
+    lock_id VARCHAR(255) NOT NULL PRIMARY KEY,
+    version BIGINT NOT NULL,
+    lock_information_json_string VARCHAR(255) NOT NULL
+)`
+	_, err = db.Exec(fmt.Sprintf(createTableSql, tableFullName))
+	if err != nil {
+		return err
+	}
+
+	x.tableFullName = tableFullName
+	x.db = db
+
+	return nil
 }
 
 func (x *MySQLStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformationJsonString string) error {
-	//TODO implement me
-	panic("implement me")
+	insertSql := fmt.Sprintf(`UPDATE %s SET version = ?, lock_information_json_string = ? WHERE lock_id = ? AND version = ?`, x.tableFullName)
+	execContext, err := x.db.ExecContext(ctx, insertSql, newVersion, lockInformationJsonString, lockId, exceptedVersion)
+	if err != nil {
+		return err
+	}
+	affected, err := execContext.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrVersionMiss
+	}
+	return nil
 }
 
 func (x *MySQLStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformationJsonString string) error {
-	//TODO implement me
-	panic("implement me")
+	insertSql := fmt.Sprintf(`INSERT INTO %s (lock_id, version, lock_information_json_string) VALUES (?, ?, ?)`, x.tableFullName)
+	execContext, err := x.db.ExecContext(ctx, insertSql, lockId, version, lockInformationJsonString)
+	if err != nil {
+		return err
+	}
+	affected, err := execContext.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrVersionMiss
+	}
+	return nil
 }
 
 func (x *MySQLStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version) error {
-	//TODO implement me
-	panic("implement me")
+	deleteSql := fmt.Sprintf(`DELETE FROM %s WHERE lock_id = ? AND version = ?`, x.tableFullName)
+	execContext, err := x.db.ExecContext(ctx, deleteSql, lockId, exceptedVersion)
+	if err != nil {
+		return err
+	}
+	affected, err := execContext.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrVersionMiss
+	}
+	return nil
 }
 
 func (x *MySQLStorage) Get(ctx context.Context, lockId string) (string, error) {
-	//TODO implement me
-	panic("implement me")
+	getLockSql := fmt.Sprintf("SELECT lock_information_json_string FROM %s WHERE lock_id = ?", x.tableFullName)
+	query, err := x.db.Query(getLockSql, lockId)
+	if err != nil {
+		return "", err
+	}
+	if !query.Next() {
+		return "", ErrLockNotFound
+	}
+	var lockInformationJsonString string
+	err = query.Scan(&lockInformationJsonString)
+	if err != nil {
+		return "", err
+	}
+	return lockInformationJsonString, nil
 }
 
 func (x *MySQLStorage) GetTime(ctx context.Context) (time.Time, error) {
-	//TODO implement me
-	panic("implement me")
+	var zero time.Time
+	query, err := x.db.Query("SELECT UNIX_TIMESTAMP(NOW())")
+	if err != nil {
+		return zero, err
+	}
+	if !query.Next() {
+		return zero, errors.New("query tidb server time failed")
+	}
+	var databaseTimestamp uint64
+	err = query.Scan(&databaseTimestamp)
+	if err != nil {
+		return zero, err
+	}
+
+	return time.Unix(int64(databaseTimestamp), 0), nil
 }
 
 func (x *MySQLStorage) Close(ctx context.Context) error {
-	//TODO implement me
-	panic("implement me")
+	if x.db == nil {
+		return nil
+	}
+	return x.db.Close()
 }
-
-//
-//func (x *MySQLStorage) UpdateWithVersion(ctx context.Context, lockId, exceptedValue, newValue string) error {
-//	updateSql := `UPDATE %s SET value = $1 WHERE key = $2 AND value = $3 `
-//}
-//
-//func (x *MySQLStorage) DeleteWithVersion(ctx context.Context, lockId, exceptedValue string) error {
-//	//TODO implement me
-//	panic("implement me")
-//}
-//
-//func (x *MySQLStorage) Get(ctx context.Context, lockId string) (string, error) {
-//	//TODO implement me
-//	panic("implement me")
-//}
-//
-//func (x *MySQLStorage) createStorageTable() {
-//
-//}
-//
-//
-//
-//updateSql := `UPDATE selefra_meta_kv SET value = $1 WHERE key = $2 AND value = $3 `
-//rs, err := x.pool.Exec(ctx, updateSql, information.ToJsonString(), lockKey, oldJsonString)
-//if err != nil {
-//return err
-//}
-//if rs.RowsAffected() == 0 {
-//return ErrLockFailed
-//} else {
-//return nil
-//}
-//} else {
-//// If a storageLock exists but is not held by itself, check to see if it is an expired storageLock
-//if information.LeaseExpireTime.After(time.Now()) {
-//// If the storageLock is not expired, it has to be abandoned
-//return ErrLockFailed
-//}
-//// If the storageLock has expired, delete it and try to reacquire it
-//dropExpiredLockSql := `DELETE FROM selefra_meta_kv WHERE key = $1 AND value = $2`
-//_, err := x.pool.Exec(ctx, dropExpiredLockSql, lockKey, oldJsonString)
-//if err != nil {
-//return err
-//}
-//// TODO
-//return x.Lock(ctx, lockId, ownerId)
-//}
-//}
-//
-//// The storageLock does not exist. Attempt to obtain the storageLock
-//lockInformation := &LockInformation{
-//OwnerId:   ownerId,
-//LockCount: 1,
-//// By default, a storageLock is expected to hold for at least ten minutes
-//LeaseExpireTime: time.Now().Add(time.Minute * 10),
-//}
-//sql := `INSERT INTO selefra_meta_kv (
-//                            "key",
-//                            "value"
-//                            ) VALUES ( $1, $2 )`
-//exec, err := x.pool.Exec(ctx, sql, lockKey, lockInformation.ToJsonString())
-//if err != nil || exec.RowsAffected() != 1 {
-//// storageLock failed
-//return ErrLockFailed
-//}
-//
-//// storageLock success, run refresh goroutine
-//storageLock.Lock()
-//defer storageLock.Unlock()
-//goroutine := lockRefreshGoroutineMap[lockId]
-//if goroutine != nil {
-//goroutine.Stop()
-//}
-//refreshGoroutine := NewLockRefreshGoroutine(x, lockId, ownerId)
-//refreshGoroutine.Start()
-//lockRefreshGoroutineMap[lockId] = refreshGoroutine
-//return nil
-//}
-//
-//// UnLock 尝试释放锁
-//func (x *StorageLock) UnLock(ctx context.Context, ownerId ...string) error {
-//	if len(ownerId) == 0 {
-//		// TODO default take goroutine ID
-//		ownerId = append(ownerId, "xxx")
-//	}
-//	lockInformation, err := x.getLockInformation(ctx)
-//	if err != nil {
-//		return err
-//	}
-//	if lockInformation == nil {
-//		return ErrLockNotFound
-//	}
-//	// storageLock exists, check it's owner
-//	if lockInformation.OwnerId != ownerId {
-//		return ErrLockNotBelongYou
-//	}
-//	oldJsonString := lockInformation.ToJsonString()
-//	// ok, storageLock is mine, storageLock count - 1
-//	lockInformation.LockCount--
-//	if lockInformation.LockCount > 0 {
-//		// It is not released completely, but the count is reduced by 1 and updated back to the database
-//		// Is reentrant to acquire the storageLock, increase the number of locks by 1
-//		lockInformation.LeaseExpireTime = time.Now().Add(time.Minute * 10)
-//		// compare and set
-//		updateSql := `UPDATE selefra_meta_kv SET value = $1 WHERE key = $2 AND value = $3 `
-//		rs, err := x.pool.Exec(ctx, updateSql, lockInformation.ToJsonString(), lockKey, oldJsonString)
-//		if err != nil {
-//			return err
-//		}
-//		if rs.RowsAffected() == 0 {
-//			return ErrUnlockFailed
-//		} else {
-//			return nil
-//		}
-//	}
-//
-//	// Once storageLock count is free, it needs to be completely free, which in this case means delete
-//	deleteSql := `DELETE FROM selefra_meta_kv WHERE key = $1 AND value = $2`
-//	exec, err := x.pool.Exec(ctx, deleteSql, lockKey, oldJsonString)
-//	if err != nil {
-//		return err
-//	}
-//	if exec.RowsAffected() == 0 {
-//		return ErrUnlockFailed
-//	}
-//
-//	// stop refresh goroutine
-//	storageLock.Lock()
-//	defer storageLock.Unlock()
-//	goroutine := lockRefreshGoroutineMap[lockId]
-//	if goroutine != nil {
-//		goroutine.Stop()
-//	}
-//
-//	return nil
-//}
-//
-//// 获取之前的锁保存的信息
-//func (x *StorageLock) getLockInformation(ctx context.Context) (*LockInformation, error) {
-//	lockInformationJsonString, err := x.storage.Get(ctx, x.options.LockId)
-//	if err != nil {
-//		return nil, err
-//	}
-//	return FromJsonString(lockInformationJsonString)
-//}
