@@ -67,9 +67,6 @@ type TidbStorage struct {
 	*MySQLStorage
 
 	options *TidbStorageOptions
-
-	db            *sql.DB
-	tableFullName string
 }
 
 var _ Storage = &TidbStorage{}
