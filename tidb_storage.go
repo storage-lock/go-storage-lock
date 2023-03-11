@@ -38,7 +38,7 @@ func (x *TidbStorageConnectionGetter) Get(ctx context.Context) (*sql.DB, error) 
 
 // ------------------------------------------------- --------------------------------------------------------------------
 
-const DefaultTidbStorageTableName = "storage_lock"
+const DefaultStorageTableName = "storage_lock"
 
 type TidbStorageOptions struct {
 

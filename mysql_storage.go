@@ -111,14 +111,6 @@ func (x *MySQLStorage) Init(ctx context.Context) error {
 
 	// 如果设置了数据库的话需要切换数据库
 	if x.options.DatabaseName != "" {
-
-		// 如果数据库不存在的话则创建
-		createDatabaseSql := fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", x.options.DatabaseName)
-		_, err := db.ExecContext(ctx, createDatabaseSql)
-		if err != nil {
-			return err
-		}
-
 		// 切换到数据库
 		_, err = db.ExecContext(ctx, "USE "+x.options.DatabaseName)
 		if err != nil {
@@ -129,7 +121,7 @@ func (x *MySQLStorage) Init(ctx context.Context) error {
 	// 创建存储锁信息需要的表
 	tableFullName := x.options.TableName
 	if tableFullName == "" {
-		tableFullName = DefaultTidbStorageTableName
+		tableFullName = DefaultStorageTableName
 	}
 	if x.options.DatabaseName != "" {
 		tableFullName = fmt.Sprintf("`%s`.`%s`", x.options.DatabaseName, tableFullName)
@@ -224,7 +216,7 @@ func (x *MySQLStorage) GetTime(ctx context.Context) (time.Time, error) {
 		return zero, err
 	}
 	if !query.Next() {
-		return zero, errors.New("query tidb server time failed")
+		return zero, errors.New("query server time failed")
 	}
 	var databaseTimestamp uint64
 	err = query.Scan(&databaseTimestamp)
