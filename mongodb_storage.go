@@ -2,6 +2,7 @@ package storage_lock
 
 import (
 	"context"
+	"errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -30,8 +31,9 @@ func NewMongoConfigurationConnectionGetter(uri string) *MongoConfigurationConnec
 
 func (x *MongoConfigurationConnectionGetter) Get(ctx context.Context) (*mongo.Client, error) {
 	if x.client == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
+		if x.URI == "" {
+			return nil, errors.New("mongo uri can not be empty")
+		}
 		client, err := mongo.Connect(ctx, options.Client().ApplyURI(x.URI))
 		if err != nil {
 			return nil, err
@@ -93,6 +95,7 @@ func (x *MongoStorage) Init(ctx context.Context) error {
 		return err
 	}
 	x.session = session
+	return nil
 }
 
 func (x *MongoStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformationJsonString string) error {
@@ -164,8 +167,9 @@ func (x *MongoStorage) Get(ctx context.Context, lockId string) (string, error) {
 }
 
 func (x *MongoStorage) GetTime(ctx context.Context) (time.Time, error) {
-	x.session.ClusterTime()
-	return , nil
+	// TODO 待定
+	//x.session.ClusterTime()
+	return time.Time{}, nil
 }
 
 func (x *MongoStorage) Close(ctx context.Context) error {
@@ -177,16 +181,16 @@ func (x *MongoStorage) Close(ctx context.Context) error {
 
 // ------------------------------------------------ ---------------------------------------------------------------------
 
-// MongoLock 表示Mongo中的一个锁信息
+// MongoLock 锁在Mongo中存储的结构
 type MongoLock struct {
 
-	// 锁的ID
+	// 锁的ID，这个字段是一个唯一字段
 	ID string `bson:"_id"`
 
-	// 锁的版本
+	// 锁的版本，每次修改都会增加1
 	Version Version `bson:"version"`
 
-	// 锁的json
+	// 锁的json信息，存储着更上层的通用的锁的信息，这里只需要认为它是一个字符串就可以了
 	LockJsonString string `bson:"lock_json_string"`
 }
 
