@@ -220,20 +220,20 @@ func (x *TidbStorage) Get(ctx context.Context, lockId string) (string, error) {
 
 func (x *TidbStorage) GetTime(ctx context.Context) (time.Time, error) {
 	var zero time.Time
-	// TODO 这种方式获取到的时间是不是靠谱
-	query, err := x.db.Query("SELECT NOW()")
+	query, err := x.db.Query("SELECT UNIX_TIMESTAMP(NOW())")
 	if err != nil {
 		return zero, err
 	}
 	if !query.Next() {
 		return zero, errors.New("query tidb server time failed")
 	}
-	var tidbServerTime time.Time
-	err = query.Scan(&tidbServerTime)
+	var databaseTimestamp uint64
+	err = query.Scan(&databaseTimestamp)
 	if err != nil {
 		return zero, err
 	}
-	return tidbServerTime, nil
+
+	return time.Unix(int64(databaseTimestamp), 0), nil
 }
 
 func (x *TidbStorage) Close(ctx context.Context) error {

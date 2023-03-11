@@ -83,6 +83,16 @@ func TestTidbStorage_Get(t *testing.T) {
 
 func TestTidbStorage_GetTime(t *testing.T) {
 
+	storage := getTestTidbStorage(t)
+	assert.NotNil(t, storage)
+
+	err := storage.Init(context.Background())
+	assert.Nil(t, err)
+
+	time, err := storage.GetTime(context.Background())
+	assert.Nil(t, err)
+	assert.False(t, time.IsZero())
+
 }
 
 func TestTidbStorage_Init(t *testing.T) {
