@@ -17,17 +17,17 @@ func (x *CassandraStorage) Init(ctx context.Context) error {
 	panic("implement me")
 }
 
-func (x *CassandraStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformationJsonString string) error {
+func (x *CassandraStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation, lockInformationJsonString string) error {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (x *CassandraStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformationJsonString string) error {
+func (x *CassandraStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation, lockInformationJsonString string) error {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (x *CassandraStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version) error {
+func (x *CassandraStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version, lockInformation *LockInformation) error {
 	//TODO implement me
 	panic("implement me")
 }

@@ -67,16 +67,16 @@ package storage_lock
 //	panic("implement me")
 //}
 //
-//func (x *RedisStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformationJsonString string) error {
+//func (x *RedisStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation, lockInformationJsonString string) error {
 //
 //}
 //
-//func (x *RedisStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformationJsonString string) error {
+//func (x *RedisStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation, lockInformationJsonString string) error {
 //	//TODO implement me
 //	panic("implement me")
 //}
 //
-//func (x *RedisStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version) error {
+//func (x *RedisStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version, lockInformation *LockInformation) error {
 //	client, err := x.connectionGetter.Get(ctx)
 //	if err != nil {
 //		return err

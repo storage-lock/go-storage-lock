@@ -13,7 +13,7 @@ const (
 	DefaultLeaseRefreshInterval = time.Second * 10
 
 	// DefaultVersionMissRetryTimes 默认的乐观锁未命中时的重试次数
-	DefaultVersionMissRetryTimes = 5
+	DefaultVersionMissRetryTimes = 100
 )
 
 // StorageLockOptions 创建存储锁的相关选项

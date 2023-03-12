@@ -98,7 +98,7 @@ func (x *MongoStorage) Init(ctx context.Context) error {
 	return nil
 }
 
-func (x *MongoStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformationJsonString string) error {
+func (x *MongoStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation, lockInformationJsonString string) error {
 	filter := bson.M{
 		"_id": bson.M{
 			"$eq": lockId,
@@ -121,7 +121,7 @@ func (x *MongoStorage) UpdateWithVersion(ctx context.Context, lockId string, exc
 	return nil
 }
 
-func (x *MongoStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformationJsonString string) error {
+func (x *MongoStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation, lockInformationJsonString string) error {
 	_, err := x.collection.InsertOne(ctx, &MongoLock{
 		ID:             lockId,
 		Version:        version,
@@ -130,7 +130,7 @@ func (x *MongoStorage) InsertWithVersion(ctx context.Context, lockId string, ver
 	return err
 }
 
-func (x *MongoStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version) error {
+func (x *MongoStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version, lockInformation *LockInformation) error {
 	filter := bson.M{
 		"_id": bson.M{
 			"$eq": lockId,

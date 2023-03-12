@@ -53,7 +53,12 @@ func NewStorageLock(storage Storage, options ...*StorageLockOptions) *StorageLoc
 
 // Lock 尝试获取锁
 func (x *StorageLock) Lock(ctx context.Context, ownerId ...string) error {
-	return x.LockWithRetry(ctx, x.options.VersionMissRetryTimes, ownerId...)
+	for {
+		err := x.LockWithRetry(ctx, x.options.VersionMissRetryTimes, ownerId...)
+		if err == nil {
+			return nil
+		}
+	}
 }
 
 // LockWithRetry 带重试次数的获取锁，因为乐观锁的失败率可能会比较高
@@ -95,7 +100,7 @@ func (x *StorageLock) LockWithRetry(ctx context.Context, leftTryTimes uint, owne
 			lockInformation.LeaseExpireTime = expireTime
 
 			// 然后尝试把新的锁的信息更新回存储介质中
-			err = x.storage.UpdateWithVersion(ctx, x.options.LockId, oldVersion, lockInformation.Version, lockInformation.ToJsonString())
+			err = x.storage.UpdateWithVersion(ctx, x.options.LockId, oldVersion, lockInformation.Version, lockInformation, lockInformation.ToJsonString())
 			// 更新成功，则本次释放锁成功
 			if err == nil {
 				return nil
@@ -123,7 +128,7 @@ func (x *StorageLock) LockWithRetry(ctx context.Context, leftTryTimes uint, owne
 			// 别人持有的锁过期了，啊哈哈，那我给它删掉清理一下吧
 			// 这个返回的错误会被忽略，删除直接重试
 			// TODO 2023-1-27 18:53:41 思考这样搞会不会有什么问题
-			_ = x.storage.DeleteWithVersion(ctx, x.options.LockId, oldVersion)
+			_ = x.storage.DeleteWithVersion(ctx, x.options.LockId, oldVersion, lockInformation)
 			return x.LockWithRetry(ctx, leftTryTimes-1, ownerId...)
 		}
 	}
@@ -136,7 +141,7 @@ func (x *StorageLock) LockWithRetry(ctx context.Context, leftTryTimes uint, owne
 		LockCount:       1,
 		LeaseExpireTime: expireTime,
 	}
-	err = x.storage.InsertWithVersion(ctx, x.options.LockId, lockInformation.Version, lockInformation.ToJsonString())
+	err = x.storage.InsertWithVersion(ctx, x.options.LockId, lockInformation.Version, lockInformation, lockInformation.ToJsonString())
 	if err != nil {
 		if leftTryTimes > 0 {
 			return x.LockWithRetry(ctx, leftTryTimes-1, ownerId...)
@@ -210,7 +215,7 @@ func (x *StorageLock) UnLockWithRetry(ctx context.Context, leftTryTimes uint, ow
 	lockInformation.LeaseExpireTime = expireTime
 	// 如果释放一次之后发现还没有释放干净，说明是重入锁，并且加锁次数还没有为0，则尝试更新锁的信息
 	if lockInformation.LockCount > 0 {
-		err := x.storage.UpdateWithVersion(ctx, x.options.LockId, lastVersion, lockInformation.Version, lockInformation.ToJsonString())
+		err := x.storage.UpdateWithVersion(ctx, x.options.LockId, lastVersion, lockInformation.Version, lockInformation, lockInformation.ToJsonString())
 		// 更新成功，直接返回，说明锁释放成功了
 		if err == nil {
 			return nil
@@ -230,7 +235,7 @@ func (x *StorageLock) UnLockWithRetry(ctx context.Context, leftTryTimes uint, ow
 		}
 	} else {
 		// 重入锁的次数已经被释放干净了，现在需要将其彻底删除
-		err := x.storage.DeleteWithVersion(ctx, x.options.LockId, lastVersion)
+		err := x.storage.DeleteWithVersion(ctx, x.options.LockId, lastVersion, lockInformation)
 		// 如果删除的时候遇到错误，则直接认为锁释放失败
 		if err != nil {
 			if errors.Is(err, ErrVersionMiss) {

@@ -141,7 +141,7 @@ func (x *PostgreSQLStorage) Init(ctx context.Context) error {
 	return nil
 }
 
-func (x *PostgreSQLStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformationJsonString string) error {
+func (x *PostgreSQLStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation, lockInformationJsonString string) error {
 	insertSql := fmt.Sprintf(`UPDATE %s SET version = $1, lock_information_json_string = $2 WHERE lock_id = $3 AND version = $4`, x.tableFullName)
 	execContext, err := x.db.ExecContext(ctx, insertSql, newVersion, lockInformationJsonString, lockId, exceptedVersion)
 	if err != nil {
@@ -157,7 +157,7 @@ func (x *PostgreSQLStorage) UpdateWithVersion(ctx context.Context, lockId string
 	return nil
 }
 
-func (x *PostgreSQLStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformationJsonString string) error {
+func (x *PostgreSQLStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation, lockInformationJsonString string) error {
 	insertSql := fmt.Sprintf(`INSERT INTO %s (lock_id, version, lock_information_json_string) VALUES ($1, $2, $3)`, x.tableFullName)
 	execContext, err := x.db.ExecContext(ctx, insertSql, lockId, version, lockInformationJsonString)
 	if err != nil {
@@ -173,7 +173,7 @@ func (x *PostgreSQLStorage) InsertWithVersion(ctx context.Context, lockId string
 	return nil
 }
 
-func (x *PostgreSQLStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version) error {
+func (x *PostgreSQLStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version, lockInformation *LockInformation) error {
 	deleteSql := fmt.Sprintf(`DELETE FROM %s WHERE lock_id = $1 AND version = $2`, x.tableFullName)
 	execContext, err := x.db.ExecContext(ctx, deleteSql, lockId, exceptedVersion)
 	if err != nil {

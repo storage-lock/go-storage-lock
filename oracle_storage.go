@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+// TODO Oracle的要实现一下吗
+
 type OracleStorage struct {
 }
 
@@ -20,17 +22,17 @@ func (x *OracleStorage) Init(ctx context.Context) error {
 	panic("implement me")
 }
 
-func (x *OracleStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformationJsonString string) error {
+func (x *OracleStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation, lockInformationJsonString string) error {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (x *OracleStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformationJsonString string) error {
+func (x *OracleStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation, lockInformationJsonString string) error {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (x *OracleStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version) error {
+func (x *OracleStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version, lockInformation *LockInformation) error {
 	//TODO implement me
 	panic("implement me")
 }

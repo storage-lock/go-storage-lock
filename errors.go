@@ -5,22 +5,22 @@ import "errors"
 var (
 
 	// ErrLockFailed 获取锁失败
-	ErrLockFailed = errors.New("storageLock failed")
+	ErrLockFailed = errors.New("lock failed")
 
 	// ErrLockAlreadyExists 锁已经存在
-	ErrLockAlreadyExists = errors.New("storageLock already exists")
+	ErrLockAlreadyExists = errors.New("lock already exists")
 
 	// ErrUnlockFailed 锁释放失败
 	ErrUnlockFailed = errors.New("unlock failed")
 
 	// ErrLockNotFound 要操作的锁不存在，本来无一物，何处染尘埃
-	ErrLockNotFound = errors.New("storageLock not found")
+	ErrLockNotFound = errors.New("lock not found")
 
 	// ErrLockNotBelongYou 尝试释放不属于自己的锁
-	ErrLockNotBelongYou = errors.New("storageLock not belong you")
+	ErrLockNotBelongYou = errors.New("v not belong you")
 
 	// ErrLockRefreshFailed 刷新锁的过期时间时出错
-	ErrLockRefreshFailed = errors.New("storageLock refresh failed")
+	ErrLockRefreshFailed = errors.New("lock refresh failed")
 )
 
 var (

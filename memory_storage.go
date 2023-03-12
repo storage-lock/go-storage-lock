@@ -53,7 +53,7 @@ func (x *MemoryStorage) Get(ctx context.Context, lockId string) (string, error) 
 	}
 }
 
-func (x *MemoryStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformationJsonString string) error {
+func (x *MemoryStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation, lockInformationJsonString string) error {
 	x.storageLock.Lock()
 	defer x.storageLock.Unlock()
 
@@ -69,7 +69,7 @@ func (x *MemoryStorage) UpdateWithVersion(ctx context.Context, lockId string, ex
 	return nil
 }
 
-func (x *MemoryStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformationJsonString string) error {
+func (x *MemoryStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation, lockInformationJsonString string) error {
 	x.storageLock.Lock()
 	defer x.storageLock.Unlock()
 
@@ -85,7 +85,7 @@ func (x *MemoryStorage) InsertWithVersion(ctx context.Context, lockId string, ve
 	return nil
 }
 
-func (x *MemoryStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version) error {
+func (x *MemoryStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version, lockInformation *LockInformation) error {
 	x.storageLock.Lock()
 	defer x.storageLock.Unlock()
 

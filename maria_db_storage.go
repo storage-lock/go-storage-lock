@@ -81,15 +81,15 @@ func (x *MariaDbStorage) Init(ctx context.Context) error {
 	return x.MySQLStorage.Init(ctx)
 }
 
-func (x *MariaDbStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformationJsonString string) error {
+func (x *MariaDbStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation, lockInformationJsonString string) error {
 	return x.MySQLStorage.UpdateWithVersion(ctx, lockId, exceptedVersion, newVersion, lockInformationJsonString)
 }
 
-func (x *MariaDbStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformationJsonString string) error {
+func (x *MariaDbStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation, lockInformationJsonString string) error {
 	return x.MySQLStorage.InsertWithVersion(ctx, lockId, version, lockInformationJsonString)
 }
 
-func (x *MariaDbStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version) error {
+func (x *MariaDbStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version, lockInformation *LockInformation) error {
 	return x.MySQLStorage.DeleteWithVersion(ctx, lockId, exceptedVersion)
 }
 
