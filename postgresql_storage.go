@@ -55,6 +55,8 @@ type PostgreSQLStorageConnectionGetter struct {
 	// 密码
 	Passwd string
 
+	DatabaseName string
+
 	// DSN
 	// Example: "host=192.168.128.206 user=postgres password=123456 port=5432 dbname=postgres sslmode=disable"
 	DSN string
@@ -75,12 +77,13 @@ func NewPostgreSQLStorageConnectionGetterFromDSN(dsn string) *PostgreSQLStorageC
 }
 
 // NewPostgreSQLStorageConnectionGetter 从服务器属性创建数据库连接
-func NewPostgreSQLStorageConnectionGetter(host string, port uint, user, passwd string) *PostgreSQLStorageConnectionGetter {
+func NewPostgreSQLStorageConnectionGetter(host string, port uint, user, passwd, databaseName string) *PostgreSQLStorageConnectionGetter {
 	return &PostgreSQLStorageConnectionGetter{
-		Host:   host,
-		Port:   port,
-		User:   user,
-		Passwd: passwd,
+		Host:         host,
+		Port:         port,
+		User:         user,
+		Passwd:       passwd,
+		DatabaseName: databaseName,
 	}
 }
 
@@ -101,7 +104,7 @@ func (x *PostgreSQLStorageConnectionGetter) GetDSN() string {
 	if x.DSN != "" {
 		return x.DSN
 	}
-	return fmt.Sprintf("sqlserver://%s:%s@%s:%d", x.User, x.Passwd, x.Host, x.Port)
+	return fmt.Sprintf("host=%s user=%s password=%s port=%d dbname=%s sslmode=disable", x.Host, x.User, x.Passwd, x.Port, x.DatabaseName)
 }
 
 // ------------------------------------------------- --------------------------------------------------------------------
