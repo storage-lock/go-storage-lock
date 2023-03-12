@@ -25,9 +25,9 @@ func NewTidbStorageConnectionGetterFromDSN(dsn string) *TidbStorageConnectionGet
 }
 
 // NewTidbStorageConnectionGetter 从服务器属性创建数据库连接
-func NewTidbStorageConnectionGetter(host string, port uint, user, passwd string) *TidbStorageConnectionGetter {
+func NewTidbStorageConnectionGetter(host string, port uint, user, passwd, databaseName string) *TidbStorageConnectionGetter {
 	return &TidbStorageConnectionGetter{
-		MySQLStorageConnectionGetter: NewMySQLStorageConnectionGetter(host, port, user, passwd),
+		MySQLStorageConnectionGetter: NewMySQLStorageConnectionGetter(host, port, user, passwd, databaseName),
 	}
 }
 
@@ -42,9 +42,6 @@ const DefaultStorageTableName = "storage_lock"
 
 type TidbStorageOptions struct {
 
-	// 锁存放在哪个数据库下
-	DatabaseName string
-
 	// 存放锁的表的名字
 	TableName string
 
@@ -54,7 +51,6 @@ type TidbStorageOptions struct {
 
 func (x *TidbStorageOptions) ToMySQLStorageOptions() *MySQLStorageOptions {
 	return &MySQLStorageOptions{
-		DatabaseName:     x.DatabaseName,
 		TableName:        x.TableName,
 		ConnectionGetter: x.ConnectionGetter,
 	}
@@ -71,11 +67,24 @@ type TidbStorage struct {
 
 var _ Storage = &TidbStorage{}
 
-func NewTidbStorage(options *TidbStorageOptions) *TidbStorage {
-	return &TidbStorage{
-		options:      options,
-		MySQLStorage: NewMySQLStorage(options.ToMySQLStorageOptions()),
+func NewTidbStorage(ctx context.Context, options *TidbStorageOptions) (*TidbStorage, error) {
+
+	mysqlStorage, err := NewMySQLStorage(ctx, options.ToMySQLStorageOptions())
+	if err != nil {
+		return nil, err
 	}
+
+	storage := &TidbStorage{
+		options:      options,
+		MySQLStorage: mysqlStorage,
+	}
+
+	err = storage.Init(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return storage, nil
 }
 
 func (x *TidbStorage) Init(ctx context.Context) error {

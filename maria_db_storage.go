@@ -25,9 +25,9 @@ func NewMariaStorageConnectionGetterFromDSN(dsn string) *MariaStorageConnectionG
 }
 
 // NewMariaStorageConnectionGetter 从服务器属性创建数据库连接
-func NewMariaStorageConnectionGetter(host string, port uint, user, passwd string) *MariaStorageConnectionGetter {
+func NewMariaStorageConnectionGetter(host string, port uint, user, passwd, database string) *MariaStorageConnectionGetter {
 	return &MariaStorageConnectionGetter{
-		MySQLStorageConnectionGetter: NewMySQLStorageConnectionGetter(host, port, user, passwd),
+		MySQLStorageConnectionGetter: NewMySQLStorageConnectionGetter(host, port, user, passwd, database),
 	}
 }
 
@@ -42,9 +42,6 @@ const DefaultMariaStorageTableName = "storage_lock"
 
 type MariaStorageOptions struct {
 
-	// 锁存放在哪个数据库下
-	DatabaseName string
-
 	// 存放锁的表的名字
 	TableName string
 
@@ -54,7 +51,6 @@ type MariaStorageOptions struct {
 
 func (x *MariaStorageOptions) ToMySQLStorageOptions() *MySQLStorageOptions {
 	return &MySQLStorageOptions{
-		DatabaseName:     x.DatabaseName,
 		TableName:        x.TableName,
 		ConnectionGetter: x.ConnectionGetter,
 	}
@@ -70,11 +66,24 @@ type MariaDbStorage struct {
 
 var _ Storage = &MariaDbStorage{}
 
-func NewMariaDbStorage(options *MariaStorageOptions) *MariaDbStorage {
-	return &MariaDbStorage{
-		options:      options,
-		MySQLStorage: NewMySQLStorage(options.ToMySQLStorageOptions()),
+func NewMariaDbStorage(ctx context.Context, options *MariaStorageOptions) (*MariaDbStorage, error) {
+
+	mysqlStorage, err := NewMySQLStorage(ctx, options.ToMySQLStorageOptions())
+	if err != nil {
+		return nil, err
 	}
+
+	storage := &MariaDbStorage{
+		options:      options,
+		MySQLStorage: mysqlStorage,
+	}
+
+	err = storage.Init(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return storage, nil
 }
 
 func (x *MariaDbStorage) Init(ctx context.Context) error {

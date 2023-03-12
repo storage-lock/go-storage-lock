@@ -141,10 +141,10 @@ func getTestTidbStorage(t *testing.T) *TidbStorage {
 	dsn := os.Getenv(envName)
 	assert.NotEmpty(t, dsn)
 	connectionGetter := NewTidbStorageConnectionGetterFromDSN(dsn)
-	storage := NewTidbStorage(&TidbStorageOptions{
+	storage, err := NewTidbStorage(context.Background(), &TidbStorageOptions{
 		ConnectionGetter: connectionGetter,
-		DatabaseName:     "storage_lock_test",
 		TableName:        "storage_lock_test",
 	})
+	assert.Nil(t, err)
 	return storage
 }

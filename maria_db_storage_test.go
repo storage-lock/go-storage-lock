@@ -141,10 +141,10 @@ func getTestMariaDbStorage(t *testing.T) *MariaDbStorage {
 	dsn := os.Getenv(envName)
 	assert.NotEmpty(t, dsn)
 	connectionGetter := NewMariaStorageConnectionGetterFromDSN(dsn)
-	storage := NewMariaDbStorage(&MariaStorageOptions{
+	storage, err := NewMariaDbStorage(context.Background(), &MariaStorageOptions{
 		ConnectionGetter: connectionGetter,
-		DatabaseName:     "storage_lock_test",
 		TableName:        "storage_lock_test",
 	})
+	assert.Nil(t, err)
 	return storage
 }
