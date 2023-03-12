@@ -130,6 +130,7 @@ func (x *MySQLStorage) Init(ctx context.Context) error {
 	}
 	createTableSql := `CREATE TABLE IF NOT EXISTS %s (
     lock_id VARCHAR(255) NOT NULL PRIMARY KEY,
+    owner_id VARCHAR(255) NOT NULL,
     version BIGINT NOT NULL,
     lock_information_json_string VARCHAR(255) NOT NULL
 )`
@@ -145,8 +146,8 @@ func (x *MySQLStorage) Init(ctx context.Context) error {
 }
 
 func (x *MySQLStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation) error {
-	insertSql := fmt.Sprintf(`UPDATE %s SET version = ?, lock_information_json_string = ? WHERE lock_id = ? AND version = ?`, x.tableFullName)
-	execContext, err := x.db.ExecContext(ctx, insertSql, newVersion, lockInformation.ToJsonString(), lockId, exceptedVersion)
+	insertSql := fmt.Sprintf(`UPDATE %s SET version = ?, lock_information_json_string = ? WHERE lock_id = ? AND owner_id = ? AND version = ?`, x.tableFullName)
+	execContext, err := x.db.ExecContext(ctx, insertSql, newVersion, lockInformation.ToJsonString(), lockId, lockInformation.OwnerId, exceptedVersion)
 	if err != nil {
 		return err
 	}
@@ -161,8 +162,8 @@ func (x *MySQLStorage) UpdateWithVersion(ctx context.Context, lockId string, exc
 }
 
 func (x *MySQLStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation) error {
-	insertSql := fmt.Sprintf(`INSERT INTO %s (lock_id, version, lock_information_json_string) VALUES (?, ?, ?)`, x.tableFullName)
-	execContext, err := x.db.ExecContext(ctx, insertSql, lockId, version, lockInformation.ToJsonString())
+	insertSql := fmt.Sprintf(`INSERT INTO %s (lock_id, owner_id, version, lock_information_json_string) VALUES (?, ?, ?, ?)`, x.tableFullName)
+	execContext, err := x.db.ExecContext(ctx, insertSql, lockId, lockInformation.OwnerId, version, lockInformation.ToJsonString())
 	if err != nil {
 		return err
 	}
@@ -177,8 +178,8 @@ func (x *MySQLStorage) InsertWithVersion(ctx context.Context, lockId string, ver
 }
 
 func (x *MySQLStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version, lockInformation *LockInformation) error {
-	deleteSql := fmt.Sprintf(`DELETE FROM %s WHERE lock_id = ? AND version = ?`, x.tableFullName)
-	execContext, err := x.db.ExecContext(ctx, deleteSql, lockId, exceptedVersion)
+	deleteSql := fmt.Sprintf(`DELETE FROM %s WHERE lock_id = ? AND owner_id = ? AND version = ?`, x.tableFullName)
+	execContext, err := x.db.ExecContext(ctx, deleteSql, lockId, lockInformation.OwnerId, exceptedVersion)
 	if err != nil {
 		return err
 	}
