@@ -1,11 +1,44 @@
+# Storage Lock 
+
+# 一、这是什么？
+
+提出了一种通用的基于存储介质（比如数据库）的分布式锁算法并对进行了编码实现。
+
+提供的锁时抢占式的非公平锁，并提供可重入的特性。
 
 
-抢占式的非公平锁
+
+# 二、 存储介质的支持
+
+- [x] MySQL
+- [x] Maria
+- [x] TiDB
+- [x] PostgreSQL
+- [x] SqlServer
+- [ ] Mongo 
+- [ ] Redis
+- [ ] Splunk
+- [ ] Oracle
+- [ ] Microsoft Azure SQL Database
+- [ ] etcd
+- [ ] Elasticsearch
+- [ ] Cassandra
+- [ ] Amazon DynamoDB
+
+更多存储介质的支持请提Issues或pr。
+
+# 三、基础使用
+
+# 四、每种存储介质的API详解
+
+## MySQL
+
+## Maria
+
+## TIDB
 
 
-
-
-# Postgresql
+## Postgresql
 
 ## 快速开始 
 
@@ -19,9 +52,9 @@
 ```
 
 
-# SQLServer
+## SQLServer
 
-## 快速开始
+### 快速开始
 
 ```go
 package main
@@ -93,7 +126,8 @@ func main() {
 }
 ```
 
-## 详细配置
+### 详细配置
+
 ```go
 package main
 
@@ -178,3 +212,32 @@ func main() {
 
 }
 ```
+
+## Mongo 
+
+## Redis
+
+## Splunk
+
+## Oracle
+
+## Microsoft Azure SQL Database
+
+## etcd
+
+## Elasticsearch
+
+## Cassandra
+
+## Amazon DynamoDB
+
+
+
+# 五、Storage Lock分布式锁算法原理详解
+
+
+
+
+
+
+

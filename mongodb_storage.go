@@ -2,12 +2,36 @@ package storage_lock
 
 import (
 	"context"
-	"errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"sync"
 	"time"
 )
+
+// ------------------------------------------------- --------------------------------------------------------------------
+
+// NewMongoStorageLock 高层API，使用默认配置快速创建基于Mongo的分布式锁
+func NewMongoStorageLock(ctx context.Context, lockId string, dsn string) (*StorageLock, error) {
+	connectionGetter := NewSqlServerStorageConnectionGetterFromDSN(dsn)
+	storageOptions := &SqlServerStorageOptions{
+		ConnectionGetter: connectionGetter,
+		TableName:        DefaultStorageTableName,
+	}
+
+	storage, err := NewSqlServerStorage(ctx, storageOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	lockOptions := &StorageLockOptions{
+		LockId:                lockId,
+		LeaseExpireAfter:      DefaultLeaseExpireAfter,
+		LeaseRefreshInterval:  DefaultLeaseRefreshInterval,
+		VersionMissRetryTimes: DefaultVersionMissRetryTimes,
+	}
+	return NewStorageLock(storage, lockOptions), nil
+}
 
 // ------------------------------------------------ ---------------------------------------------------------------------
 
@@ -18,7 +42,9 @@ type MongoConfigurationConnectionGetter struct {
 	URI string
 
 	// Mongo客户端
-	client *mongo.Client
+	clientOnce sync.Once
+	err        error
+	client     *mongo.Client
 }
 
 var _ ConnectionGetter[*mongo.Client] = &MongoConfigurationConnectionGetter{}
@@ -30,17 +56,15 @@ func NewMongoConfigurationConnectionGetter(uri string) *MongoConfigurationConnec
 }
 
 func (x *MongoConfigurationConnectionGetter) Get(ctx context.Context) (*mongo.Client, error) {
-	if x.client == nil {
-		if x.URI == "" {
-			return nil, errors.New("mongo uri can not be empty")
-		}
+	x.clientOnce.Do(func() {
 		client, err := mongo.Connect(ctx, options.Client().ApplyURI(x.URI))
 		if err != nil {
-			return nil, err
+			x.err = err
+			return
 		}
 		x.client = client
-	}
-	return x.client, nil
+	})
+	return x.client, x.err
 }
 
 // ------------------------------------------------ ---------------------------------------------------------------------
@@ -103,6 +127,9 @@ func (x *MongoStorage) UpdateWithVersion(ctx context.Context, lockId string, exc
 		"_id": bson.M{
 			"$eq": lockId,
 		},
+		"owner_id": bson.M{
+			"$eq": lockInformation.OwnerId,
+		},
 		"version": bson.M{
 			"$eq": exceptedVersion,
 		},
@@ -124,6 +151,7 @@ func (x *MongoStorage) UpdateWithVersion(ctx context.Context, lockId string, exc
 func (x *MongoStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation) error {
 	_, err := x.collection.InsertOne(ctx, &MongoLock{
 		ID:             lockId,
+		OwnerId:        lockInformation.OwnerId,
 		Version:        version,
 		LockJsonString: lockInformation.ToJsonString(),
 	})
@@ -134,6 +162,9 @@ func (x *MongoStorage) DeleteWithVersion(ctx context.Context, lockId string, exc
 	filter := bson.M{
 		"_id": bson.M{
 			"$eq": lockId,
+		},
+		"owner_id": bson.M{
+			"$eq": lockInformation.OwnerId,
 		},
 		"version": bson.M{
 			"$eq": exceptedVersion,
@@ -186,6 +217,9 @@ type MongoLock struct {
 
 	// 锁的ID，这个字段是一个唯一字段
 	ID string `bson:"_id"`
+
+	// 锁的当前持有者的ID
+	OwnerId string `bson:"ownerId"`
 
 	// 锁的版本，每次修改都会增加1
 	Version Version `bson:"version"`
