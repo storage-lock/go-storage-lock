@@ -40,7 +40,7 @@
 
 ## Postgresql
 
-快速开始 
+### 快速开始 
 
 ```go
 package main
@@ -56,8 +56,11 @@ import (
 
 func main() {
 
+	// Docker启动Postgresql：
+	// docker run -d --name storage-lock-postgres -p 5432:5432 -e POSTGRES_PASSWORD=UeGqAm8CxYGldMDLoNNt postgres:14
+
 	// DSN的写法参考驱动的支持：https://github.com/lib/pq
-	dsn := "host=192.168.128.206 user=postgres password=123456 port=5432 dbname=postgres sslmode=disable"
+	dsn := "host=192.168.128.206 user=postgres password=UeGqAm8CxYGldMDLoNNt port=5432 dbname=postgres sslmode=disable"
 
 	// 这个是最为重要的，通常是要锁住的资源的名称
 	lockId := "must-serial-operation-resource-foo"
@@ -143,6 +146,7 @@ func main() {
 	// worker-7
 
 }
+
 ```
 
 ### 详细配置
@@ -160,8 +164,11 @@ import (
 
 func main() {
 
+	// Docker启动Postgresql：
+	// docker run -d --name storage-lock-postgres -p 5432:5432 -e POSTGRES_PASSWORD=UeGqAm8CxYGldMDLoNNt postgres:14
+
 	// DSN的写法参考驱动的支持：https://github.com/lib/pq
-	dsn := "host=192.168.128.206 user=postgres password=123456 port=5432 dbname=postgres sslmode=disable"
+	dsn := "host=192.168.128.206 user=postgres password=UeGqAm8CxYGldMDLoNNt port=5432 dbname=postgres sslmode=disable"
 
 	// 第一步先配置存储介质相关的参数，包括如何连接到这个数据库，连接上去之后锁的信息存储到哪里等等
 	// 配置如何连接到数据库
@@ -264,6 +271,7 @@ func main() {
 	// worker-7
 
 }
+
 ```
 
 

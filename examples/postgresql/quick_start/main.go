@@ -11,8 +11,11 @@ import (
 
 func main() {
 
+	// Docker启动Postgresql：
+	// docker run -d --name storage-lock-postgres -p 5432:5432 -e POSTGRES_PASSWORD=UeGqAm8CxYGldMDLoNNt postgres:14
+
 	// DSN的写法参考驱动的支持：https://github.com/lib/pq
-	dsn := "host=192.168.128.206 user=postgres password=123456 port=5432 dbname=postgres sslmode=disable"
+	dsn := "host=192.168.128.206 user=postgres password=UeGqAm8CxYGldMDLoNNt port=5432 dbname=postgres sslmode=disable"
 
 	// 这个是最为重要的，通常是要锁住的资源的名称
 	lockId := "must-serial-operation-resource-foo"
