@@ -5,6 +5,7 @@ import (
 	"errors"
 	variable_parameter "github.com/golang-infrastructure/go-variable-parameter"
 	"github.com/google/uuid"
+	"math/rand"
 	"strings"
 	"time"
 )
@@ -53,16 +54,18 @@ func NewStorageLock(storage Storage, options ...*StorageLockOptions) *StorageLoc
 
 // Lock 尝试获取锁
 func (x *StorageLock) Lock(ctx context.Context, ownerId ...string) error {
+	// TODO 修改为退避指数式休眠
 	for {
-		err := x.LockWithRetry(ctx, x.options.VersionMissRetryTimes, ownerId...)
+		err := x.lockWithRetry(ctx, x.options.VersionMissRetryTimes, ownerId...)
 		if err == nil {
 			return nil
 		}
+		time.Sleep(time.Second * time.Duration(rand.Intn(5)+1))
 	}
 }
 
-// LockWithRetry 带重试次数的获取锁，因为乐观锁的失败率可能会比较高
-func (x *StorageLock) LockWithRetry(ctx context.Context, leftTryTimes uint, ownerId ...string) error {
+// lockWithRetry 带重试次数的获取锁，因为乐观锁的失败率可能会比较高
+func (x *StorageLock) lockWithRetry(ctx context.Context, leftTryTimes uint, ownerId ...string) error {
 
 	// 如果没有指定ownerId，则为其生成一个默认的ownerId
 	if len(ownerId) == 0 {
@@ -111,7 +114,7 @@ func (x *StorageLock) LockWithRetry(ctx context.Context, leftTryTimes uint, owne
 			}
 			// 执行到这里，要么是没更新成功，是还有重试次数的话则重试
 			if leftTryTimes > 0 {
-				return x.LockWithRetry(ctx, leftTryTimes-1, ownerId...)
+				return x.lockWithRetry(ctx, leftTryTimes-1, ownerId...)
 			} else {
 				return err
 			}
@@ -129,7 +132,7 @@ func (x *StorageLock) LockWithRetry(ctx context.Context, leftTryTimes uint, owne
 			// 这个返回的错误会被忽略，删除直接重试
 			// TODO 2023-1-27 18:53:41 思考这样搞会不会有什么问题
 			_ = x.storage.DeleteWithVersion(ctx, x.options.LockId, oldVersion, lockInformation)
-			return x.LockWithRetry(ctx, leftTryTimes-1, ownerId...)
+			return x.lockWithRetry(ctx, leftTryTimes-1, ownerId...)
 		}
 	}
 
@@ -144,7 +147,7 @@ func (x *StorageLock) LockWithRetry(ctx context.Context, leftTryTimes uint, owne
 	err = x.storage.InsertWithVersion(ctx, x.options.LockId, lockInformation.Version, lockInformation)
 	if err != nil {
 		if leftTryTimes > 0 {
-			return x.LockWithRetry(ctx, leftTryTimes-1, ownerId...)
+			return x.lockWithRetry(ctx, leftTryTimes-1, ownerId...)
 		} else {
 			return ErrLockFailed
 		}
@@ -173,11 +176,18 @@ func (x *StorageLock) getLeaseExpireTime(ctx context.Context) (time.Time, error)
 
 // UnLock 尝试释放锁，如果释放不成功的话则会返回error
 func (x *StorageLock) UnLock(ctx context.Context, ownerId ...string) error {
-	return x.UnLockWithRetry(ctx, x.options.VersionMissRetryTimes, ownerId...)
+	// TODO 修改为退避指数式休眠
+	for {
+		err := x.unLockWithRetry(ctx, x.options.VersionMissRetryTimes, ownerId...)
+		if err == nil {
+			return nil
+		}
+		time.Sleep(time.Second * time.Duration(rand.Intn(5)+1))
+	}
 }
 
-// UnLockWithRetry 手动指定重试次数的释放锁，如果锁竞争较大的话应该适当提高乐观锁的失败重试次数
-func (x *StorageLock) UnLockWithRetry(ctx context.Context, leftTryTimes uint, ownerId ...string) error {
+// unLockWithRetry 手动指定重试次数的释放锁，如果锁竞争较大的话应该适当提高乐观锁的失败重试次数
+func (x *StorageLock) unLockWithRetry(ctx context.Context, leftTryTimes uint, ownerId ...string) error {
 
 	// 如果没有指定ownerId的话，则为其生成一个默认的ownerId
 	if len(ownerId) == 0 {
@@ -228,7 +238,7 @@ func (x *StorageLock) UnLockWithRetry(ctx context.Context, leftTryTimes uint, ow
 		// 更新未成功，看下是否还有重试次数
 		if leftTryTimes > 0 {
 			// 我还有重试次数，我要尝试重试
-			return x.UnLockWithRetry(ctx, leftTryTimes-1, ownerId...)
+			return x.unLockWithRetry(ctx, leftTryTimes-1, ownerId...)
 		} else {
 			// 更新失败，并且也没有重试次数了，则只好返回错误
 			return ErrUnlockFailed
@@ -241,7 +251,7 @@ func (x *StorageLock) UnLockWithRetry(ctx context.Context, leftTryTimes uint, ow
 			if errors.Is(err, ErrVersionMiss) {
 				// 还有重试次数，则再次尝试删除锁
 				if leftTryTimes > 0 {
-					return x.UnLockWithRetry(ctx, leftTryTimes-1, ownerId...)
+					return x.unLockWithRetry(ctx, leftTryTimes-1, ownerId...)
 				} else {
 					// 没有重试次数了，则只好返回错误
 					return ErrLockFailed
@@ -257,20 +267,20 @@ func (x *StorageLock) UnLockWithRetry(ctx context.Context, leftTryTimes uint, ow
 	}
 }
 
-// UnLockUntilRelease 一直unlock直到释放掉锁，可能的场景是可重入锁重启之后清除之前可能存在的锁状态
-func (x *StorageLock) UnLockUntilRelease(ctx context.Context, ownerId ...string) error {
-	// TODO 递归可能会有溢出的风险，修改为迭代实现
-	err := x.UnLock(ctx, ownerId...)
-	if err != nil {
-		if errors.Is(err, ErrLockNotFound) {
-			return nil
-		} else {
-			return err
-		}
-	} else {
-		return x.UnLockUntilRelease(ctx, ownerId...)
-	}
-}
+//// UnLockUntilRelease 一直unlock直到释放掉锁，可能的场景是可重入锁重启之后清除之前可能存在的锁状态
+//func (x *StorageLock) UnLockUntilRelease(ctx context.Context, ownerId ...string) error {
+//	// TODO 递归可能会有溢出的风险，修改为迭代实现
+//	err := x.UnLock(ctx, ownerId...)
+//	if err != nil {
+//		if errors.Is(err, ErrLockNotFound) {
+//			return nil
+//		} else {
+//			return err
+//		}
+//	} else {
+//		return x.UnLockUntilRelease(ctx, ownerId...)
+//	}
+//}
 
 // 获取之前的锁保存的信息
 func (x *StorageLock) getLockInformation(ctx context.Context) (*LockInformation, error) {

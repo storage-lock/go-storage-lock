@@ -21,7 +21,11 @@ func main() {
 		// 锁的信息是存储在哪张表中的，不设置的话默认为storage_lock
 		TableName: "storage_lock_table",
 	}
-	storage := storage_lock.NewSqlServerStorage(storageOptions)
+	storage, err := storage_lock.NewSqlServerStorage(context.Background(), storageOptions)
+	if err != nil {
+		fmt.Println("创建Storage错误： " + err.Error())
+		return
+	}
 
 	// 第二步配置锁的参数，在上面创建的Storage的上创建一把锁
 	lockOptions := &storage_lock.StorageLockOptions{
@@ -35,7 +39,7 @@ func main() {
 
 	// 第三步开始使用锁，模拟多个节点竞争同一个锁使用的情况
 
-	err := lock.Lock(context.Background())
+	err = lock.Lock(context.Background())
 	if err != nil {
 		fmt.Println("获取锁失败: " + err.Error())
 		return
