@@ -53,7 +53,7 @@ type SqlServerStorageConnectionGetter struct {
 	Passwd string
 
 	// DSN
-	// Example: sqlserver://sa:UeGqAm8CxYGldMDLoNNt@192.168.128.206:1433
+	// Example: "sqlserver://sa:UeGqAm8CxYGldMDLoNNt@192.168.128.206:1433"
 	DSN string
 
 	// 初始化好的数据库实例

@@ -72,13 +72,13 @@ func TestPostgreSQLStorage_Get(t *testing.T) {
 
 	testEnsureLockNotExists(t, storage, testStorageLockId)
 
-	lockInformationJsonString := getTestLockInformation(t)
-	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, lockInformationJsonString)
+	lockInformation := getTestLockInformation(t)
+	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, lockInformation)
 	assert.Nil(t, err)
 
 	lockInformationJsonStringRs, err := storage.Get(context.Background(), testStorageLockId)
 	assert.Nil(t, err)
-	assert.Equal(t, lockInformationJsonString, lockInformationJsonStringRs)
+	assert.Equal(t, lockInformation.ToJsonString(), lockInformationJsonStringRs)
 
 }
 
@@ -141,9 +141,10 @@ func getTestPostgreSQLStorage(t *testing.T) *PostgreSQLStorage {
 	dsn := os.Getenv(envName)
 	assert.NotEmpty(t, dsn)
 	connectionGetter := NewPostgreSQLStorageConnectionGetterFromDSN(dsn)
-	storage := NewPostgreSQLStorage(&PostgreSQLStorageOptions{
+	storage, err := NewPostgreSQLStorage(context.Background(), &PostgreSQLStorageOptions{
 		ConnectionGetter: connectionGetter,
 		TableName:        "storage_lock_test",
 	})
+	assert.Nil(t, err)
 	return storage
 }

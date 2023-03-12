@@ -13,6 +13,34 @@ import (
 
 // ------------------------------------------------- --------------------------------------------------------------------
 
+// NewPostgreSQLStorageLock 高层API，使用默认配置快速创建基于PostgreSQL的分布式锁
+func NewPostgreSQLStorageLock(ctx context.Context, lockId string, dsn string, schema ...string) (*StorageLock, error) {
+	connectionGetter := NewPostgreSQLStorageConnectionGetterFromDSN(dsn)
+	storageOptions := &PostgreSQLStorageOptions{
+		ConnectionGetter: connectionGetter,
+		TableName:        DefaultStorageTableName,
+	}
+
+	if len(schema) != 0 {
+		storageOptions.Schema = schema[0]
+	}
+
+	storage, err := NewPostgreSQLStorage(ctx, storageOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	lockOptions := &StorageLockOptions{
+		LockId:                lockId,
+		LeaseExpireAfter:      DefaultLeaseExpireAfter,
+		LeaseRefreshInterval:  DefaultLeaseRefreshInterval,
+		VersionMissRetryTimes: DefaultVersionMissRetryTimes,
+	}
+	return NewStorageLock(storage, lockOptions), nil
+}
+
+// ------------------------------------------------- --------------------------------------------------------------------
+
 type PostgreSQLStorageConnectionGetter struct {
 
 	// 主机的名字
@@ -28,7 +56,7 @@ type PostgreSQLStorageConnectionGetter struct {
 	Passwd string
 
 	// DSN
-	// "root:@tcp(127.0.0.1:4000)/test?charset=utf8mb4"
+	// Example: "host=192.168.128.206 user=postgres password=123456 port=5432 dbname=postgres sslmode=disable"
 	DSN string
 
 	// 初始化好的数据库实例
@@ -59,7 +87,7 @@ func NewPostgreSQLStorageConnectionGetter(host string, port uint, user, passwd s
 // Get 获取到数据库的连接
 func (x *PostgreSQLStorageConnectionGetter) Get(ctx context.Context) (*sql.DB, error) {
 	x.once.Do(func() {
-		db, err := sql.Open("postgres", x.DSN)
+		db, err := sql.Open("postgres", x.GetDSN())
 		if err != nil {
 			x.err = err
 			return
@@ -69,11 +97,20 @@ func (x *PostgreSQLStorageConnectionGetter) Get(ctx context.Context) (*sql.DB, e
 	return x.db, x.err
 }
 
+func (x *PostgreSQLStorageConnectionGetter) GetDSN() string {
+	if x.DSN != "" {
+		return x.DSN
+	}
+	return fmt.Sprintf("sqlserver://%s:%s@%s:%d", x.User, x.Passwd, x.Host, x.Port)
+}
+
 // ------------------------------------------------- --------------------------------------------------------------------
 
 const DefaultPostgreSQLStorageSchema = "public"
 
 type PostgreSQLStorageOptions struct {
+
+	// 存在哪个schema下，默认是public
 	Schema string
 
 	// 存放锁的表的名字
@@ -94,10 +131,17 @@ type PostgreSQLStorage struct {
 
 var _ Storage = &PostgreSQLStorage{}
 
-func NewPostgreSQLStorage(options *PostgreSQLStorageOptions) *PostgreSQLStorage {
-	return &PostgreSQLStorage{
+func NewPostgreSQLStorage(ctx context.Context, options *PostgreSQLStorageOptions) (*PostgreSQLStorage, error) {
+	storage := &PostgreSQLStorage{
 		options: options,
 	}
+
+	err := storage.Init(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return storage, nil
 }
 
 func (x *PostgreSQLStorage) Init(ctx context.Context) error {
@@ -108,7 +152,7 @@ func (x *PostgreSQLStorage) Init(ctx context.Context) error {
 
 	// 如果设置了数据库的话需要切换数据库
 	if x.options.Schema != "" {
-		// 切换到数据库
+		// 切换到schema，如果需要的话，但是schema不会自动创建，需要使用者自己创建，会自动创建的只有存放锁信息的表
 		_, err = db.ExecContext(ctx, fmt.Sprintf("SET search_path TO %s ", x.options.Schema))
 		if err != nil {
 			return err
@@ -127,10 +171,11 @@ func (x *PostgreSQLStorage) Init(ctx context.Context) error {
 	}
 	createTableSql := `CREATE TABLE IF NOT EXISTS %s (
     lock_id VARCHAR(255) NOT NULL PRIMARY KEY,
+    owner_id VARCHAR(255) NOT NULL, 
     version BIGINT NOT NULL,
     lock_information_json_string VARCHAR(255) NOT NULL
 )`
-	_, err = db.Exec(fmt.Sprintf(createTableSql, tableFullName))
+	_, err = db.ExecContext(ctx, fmt.Sprintf(createTableSql, tableFullName))
 	if err != nil {
 		return err
 	}
@@ -142,8 +187,8 @@ func (x *PostgreSQLStorage) Init(ctx context.Context) error {
 }
 
 func (x *PostgreSQLStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation) error {
-	insertSql := fmt.Sprintf(`UPDATE %s SET version = $1, lock_information_json_string = $2 WHERE lock_id = $3 AND version = $4`, x.tableFullName)
-	execContext, err := x.db.ExecContext(ctx, insertSql, newVersion, lockInformation.ToJsonString(), lockId, exceptedVersion)
+	insertSql := fmt.Sprintf(`UPDATE %s SET version = $1, lock_information_json_string = $2 WHERE lock_id = $3 AND owner_id = $4 AND version = $5`, x.tableFullName)
+	execContext, err := x.db.ExecContext(ctx, insertSql, newVersion, lockInformation.ToJsonString(), lockId, lockInformation.OwnerId, exceptedVersion)
 	if err != nil {
 		return err
 	}
@@ -158,8 +203,8 @@ func (x *PostgreSQLStorage) UpdateWithVersion(ctx context.Context, lockId string
 }
 
 func (x *PostgreSQLStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation) error {
-	insertSql := fmt.Sprintf(`INSERT INTO %s (lock_id, version, lock_information_json_string) VALUES ($1, $2, $3)`, x.tableFullName)
-	execContext, err := x.db.ExecContext(ctx, insertSql, lockId, version, lockInformation.ToJsonString())
+	insertSql := fmt.Sprintf(`INSERT INTO %s (lock_id, owner_id, version, lock_information_json_string) VALUES ($1, $2, $3, $4)`, x.tableFullName)
+	execContext, err := x.db.ExecContext(ctx, insertSql, lockId, lockInformation.OwnerId, version, lockInformation.ToJsonString())
 	if err != nil {
 		return err
 	}
@@ -174,8 +219,8 @@ func (x *PostgreSQLStorage) InsertWithVersion(ctx context.Context, lockId string
 }
 
 func (x *PostgreSQLStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version, lockInformation *LockInformation) error {
-	deleteSql := fmt.Sprintf(`DELETE FROM %s WHERE lock_id = $1 AND version = $2`, x.tableFullName)
-	execContext, err := x.db.ExecContext(ctx, deleteSql, lockId, exceptedVersion)
+	deleteSql := fmt.Sprintf(`DELETE FROM %s WHERE lock_id = $1 AND owner_id = $2 AND version = $3`, x.tableFullName)
+	execContext, err := x.db.ExecContext(ctx, deleteSql, lockId, lockInformation.OwnerId, exceptedVersion)
 	if err != nil {
 		return err
 	}
@@ -191,15 +236,18 @@ func (x *PostgreSQLStorage) DeleteWithVersion(ctx context.Context, lockId string
 
 func (x *PostgreSQLStorage) Get(ctx context.Context, lockId string) (string, error) {
 	getLockSql := fmt.Sprintf("SELECT lock_information_json_string FROM %s WHERE lock_id = $1", x.tableFullName)
-	query, err := x.db.Query(getLockSql, lockId)
+	rs, err := x.db.Query(getLockSql, lockId)
 	if err != nil {
 		return "", err
 	}
-	if !query.Next() {
+	defer func() {
+		_ = rs.Close()
+	}()
+	if !rs.Next() {
 		return "", ErrLockNotFound
 	}
 	var lockInformationJsonString string
-	err = query.Scan(&lockInformationJsonString)
+	err = rs.Scan(&lockInformationJsonString)
 	if err != nil {
 		return "", err
 	}
@@ -208,15 +256,18 @@ func (x *PostgreSQLStorage) Get(ctx context.Context, lockId string) (string, err
 
 func (x *PostgreSQLStorage) GetTime(ctx context.Context) (time.Time, error) {
 	var zero time.Time
-	query, err := x.db.Query("SELECT CURRENT_TIMESTAMP")
+	rs, err := x.db.Query("SELECT CURRENT_TIMESTAMP")
 	if err != nil {
 		return zero, err
 	}
-	if !query.Next() {
-		return zero, errors.New("query server time failed")
+	defer func() {
+		_ = rs.Close()
+	}()
+	if !rs.Next() {
+		return zero, errors.New("rs server time failed")
 	}
 	var databaseTime time.Time
-	err = query.Scan(&databaseTime)
+	err = rs.Scan(&databaseTime)
 	if err != nil {
 		return zero, err
 	}

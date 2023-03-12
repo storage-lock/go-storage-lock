@@ -3,6 +3,7 @@ package storage_lock
 import (
 	"context"
 	"errors"
+	"fmt"
 	variable_parameter "github.com/golang-infrastructure/go-variable-parameter"
 	"github.com/google/uuid"
 	"math/rand"
@@ -182,6 +183,8 @@ func (x *StorageLock) UnLock(ctx context.Context, ownerId ...string) error {
 		if err == nil {
 			return nil
 		}
+		// TODO
+		fmt.Println(err.Error())
 		time.Sleep(time.Second * time.Duration(rand.Intn(5)+1))
 	}
 }
