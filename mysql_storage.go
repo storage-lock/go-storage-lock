@@ -195,15 +195,18 @@ func (x *MySQLStorage) DeleteWithVersion(ctx context.Context, lockId string, exc
 
 func (x *MySQLStorage) Get(ctx context.Context, lockId string) (string, error) {
 	getLockSql := fmt.Sprintf("SELECT lock_information_json_string FROM %s WHERE lock_id = ?", x.tableFullName)
-	query, err := x.db.Query(getLockSql, lockId)
+	rs, err := x.db.Query(getLockSql, lockId)
 	if err != nil {
 		return "", err
 	}
-	if !query.Next() {
+	defer func() {
+		_ = rs.Close()
+	}()
+	if !rs.Next() {
 		return "", ErrLockNotFound
 	}
 	var lockInformationJsonString string
-	err = query.Scan(&lockInformationJsonString)
+	err = rs.Scan(&lockInformationJsonString)
 	if err != nil {
 		return "", err
 	}
@@ -212,15 +215,18 @@ func (x *MySQLStorage) Get(ctx context.Context, lockId string) (string, error) {
 
 func (x *MySQLStorage) GetTime(ctx context.Context) (time.Time, error) {
 	var zero time.Time
-	query, err := x.db.Query("SELECT UNIX_TIMESTAMP(NOW())")
+	rs, err := x.db.Query("SELECT UNIX_TIMESTAMP(NOW())")
 	if err != nil {
 		return zero, err
 	}
-	if !query.Next() {
-		return zero, errors.New("query server time failed")
+	defer func() {
+		_ = rs.Close()
+	}()
+	if !rs.Next() {
+		return zero, errors.New("rs server time failed")
 	}
 	var databaseTimestamp uint64
-	err = query.Scan(&databaseTimestamp)
+	err = rs.Scan(&databaseTimestamp)
 	if err != nil {
 		return zero, err
 	}
