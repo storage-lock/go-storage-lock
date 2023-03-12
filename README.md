@@ -10,8 +10,8 @@
 
 # 二、 存储介质的支持
 
-- [x] MySQL
-- [x] Maria
+- [x] [MySQL](#MySQL)
+- [x] [MariaDB](#MariaDB)
 - [x] TiDB
 - [x] [PostgreSQL](#Postgresql)
 - [x] [SQLServer](#SQLServer)
@@ -269,7 +269,7 @@ func main() {
 
 
 
-## Maria
+## MariaDB
 
 ### 快速开始
 
