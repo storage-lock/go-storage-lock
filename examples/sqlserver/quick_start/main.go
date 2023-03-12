@@ -20,11 +20,11 @@ func main() {
 	// 第一步创建一把分布式锁
 	lock, err := storage_lock.NewSqlServerStorageLock(context.Background(), lockId, dsn)
 	if err != nil {
-		fmt.Printf("ERROR: %v\n", err.Error())
+		fmt.Printf("Create Lock Failed: %v\n", err.Error())
 		return
 	}
 
-	// 第二步使用这把锁，这里就模拟一个多个节点竞争执行的情况
+	// 第二步使用这把锁，这里就模拟多个节点竞争执行的情况，他们会线程安全的往resource里写数据
 	resource := strings.Builder{}
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
@@ -58,7 +58,6 @@ func main() {
 
 		}()
 	}
-
 	wg.Wait()
 
 	// 观察最终的输出是否和日志一致

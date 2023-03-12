@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	storage_lock "github.com/golang-infrastructure/go-storage-lock"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,7 +25,7 @@ func main() {
 	}
 	storage, err := storage_lock.NewSqlServerStorage(context.Background(), storageOptions)
 	if err != nil {
-		fmt.Println("创建Storage错误： " + err.Error())
+		fmt.Println("Create Storage Failed： " + err.Error())
 		return
 	}
 
@@ -38,13 +40,43 @@ func main() {
 	lock := storage_lock.NewStorageLock(storage, lockOptions)
 
 	// 第三步开始使用锁，模拟多个节点竞争同一个锁使用的情况
+	resource := strings.Builder{}
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		workerId := fmt.Sprintf("worker-%d", i)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 
-	err = lock.Lock(context.Background())
-	if err != nil {
-		fmt.Println("获取锁失败: " + err.Error())
-		return
+			// 获取锁
+			err := lock.Lock(context.Background(), workerId)
+			if err != nil {
+				fmt.Printf("workerId = %s, lock failed: %s \n", workerId, err.Error())
+				return
+			}
+			// 退出的时候释放锁
+			defer func() {
+				err := lock.UnLock(context.Background(), workerId)
+				if err != nil {
+					fmt.Printf("workerId = %s, unlock failed: %s \n", workerId, err.Error())
+					return
+				}
+			}()
+
+			// 假装有耗时的操作
+			fmt.Printf("workerId = %s, begin write resource \n", workerId)
+			time.Sleep(time.Second * 3)
+			// 接下来是操作竞态资源
+			resource.WriteString(workerId)
+			fmt.Printf("workerId = %s, write resource done \n", workerId)
+			resource.WriteString("\n")
+
+		}()
 	}
+	wg.Wait()
 
-	fmt.Println("获取锁成功")
+	// 观察最终的输出是否和日志一致
+	fmt.Println("Resource: ")
+	fmt.Println(resource.String())
 
 }
