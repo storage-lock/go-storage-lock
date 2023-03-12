@@ -82,16 +82,16 @@ func (x *TidbStorage) Init(ctx context.Context) error {
 	return x.MySQLStorage.Init(ctx)
 }
 
-func (x *TidbStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation, lockInformationJsonString string) error {
-	return x.MySQLStorage.UpdateWithVersion(ctx, lockId, exceptedVersion, newVersion, lockInformationJsonString)
+func (x *TidbStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation) error {
+	return x.MySQLStorage.UpdateWithVersion(ctx, lockId, exceptedVersion, newVersion, lockInformation)
 }
 
-func (x *TidbStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation, lockInformationJsonString string) error {
-	return x.MySQLStorage.InsertWithVersion(ctx, lockId, version, lockInformationJsonString)
+func (x *TidbStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation) error {
+	return x.MySQLStorage.InsertWithVersion(ctx, lockId, version, lockInformation)
 }
 
 func (x *TidbStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version, lockInformation *LockInformation) error {
-	return x.MySQLStorage.DeleteWithVersion(ctx, lockId, exceptedVersion)
+	return x.MySQLStorage.DeleteWithVersion(ctx, lockId, exceptedVersion, lockInformation)
 }
 
 func (x *TidbStorage) Get(ctx context.Context, lockId string) (string, error) {

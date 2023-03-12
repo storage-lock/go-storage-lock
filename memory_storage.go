@@ -53,7 +53,7 @@ func (x *MemoryStorage) Get(ctx context.Context, lockId string) (string, error) 
 	}
 }
 
-func (x *MemoryStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation, lockInformationJsonString string) error {
+func (x *MemoryStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation) error {
 	x.storageLock.Lock()
 	defer x.storageLock.Unlock()
 
@@ -64,12 +64,12 @@ func (x *MemoryStorage) UpdateWithVersion(ctx context.Context, lockId string, ex
 	if oldValue.Version != exceptedVersion {
 		return ErrVersionMiss
 	}
-	oldValue.LockInformationJsonString = lockInformationJsonString
+	oldValue.LockInformationJsonString = lockInformation.ToJsonString()
 	oldValue.Version = newVersion
 	return nil
 }
 
-func (x *MemoryStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation, lockInformationJsonString string) error {
+func (x *MemoryStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation) error {
 	x.storageLock.Lock()
 	defer x.storageLock.Unlock()
 
@@ -80,7 +80,7 @@ func (x *MemoryStorage) InsertWithVersion(ctx context.Context, lockId string, ve
 	x.storageMap[lockId] = &MemoryStorageValue{
 		LockId:                    lockId,
 		Version:                   version,
-		LockInformationJsonString: lockInformationJsonString,
+		LockInformationJsonString: lockInformation.ToJsonString(),
 	}
 	return nil
 }

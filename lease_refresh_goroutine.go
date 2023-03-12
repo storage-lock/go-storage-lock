@@ -88,5 +88,5 @@ func (x *LeaseRefreshGoroutine) refreshLeaseExpiredTime(ctx context.Context) err
 		return err
 	}
 	information.LeaseExpireTime = expireTime
-	return x.storageLock.storage.UpdateWithVersion(ctx, x.storageLock.options.LockId, lastVersion, information.Version, information.ToJsonString())
+	return x.storageLock.storage.UpdateWithVersion(ctx, x.storageLock.options.LockId, lastVersion, information.Version, information)
 }

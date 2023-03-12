@@ -164,10 +164,11 @@ func (x *SqlServerStorage) Init(ctx context.Context) error {
 	SELECT * FROM sys.tables t
 	JOIN sys.schemas s ON (t.schema_id = s.schema_id)
 	WHERE s.name = 'dbo' AND t.name = '%s')
-	CREATE TABLE %s (
-	      lock_id VARCHAR(255) NOT NULL PRIMARY KEY,
-	 version BIGINT NOT NULL,
-	 lock_information_json_string VARCHAR(255) NOT NULL
+CREATE TABLE %s (
+    lock_id VARCHAR(255) NOT NULL PRIMARY KEY,
+    owner_id VARCHAR(255) NOT NULL, 
+    version BIGINT NOT NULL,
+    lock_information_json_string VARCHAR(255) NOT NULL
 	   );`
 
 	_, err = db.ExecContext(ctx, fmt.Sprintf(createTableSql, tableFullName, tableFullName))
@@ -181,9 +182,9 @@ func (x *SqlServerStorage) Init(ctx context.Context) error {
 	return nil
 }
 
-func (x *SqlServerStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation, lockInformationJsonString string) error {
-	insertSql := fmt.Sprintf(`UPDATE %s SET version = ?, lock_information_json_string = ? WHERE lock_id = ? AND version = ?`, x.tableFullName)
-	execContext, err := x.db.ExecContext(ctx, insertSql, newVersion, lockInformationJsonString, lockId, exceptedVersion)
+func (x *SqlServerStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation) error {
+	insertSql := fmt.Sprintf(`UPDATE %s SET version = ?, lock_information_json_string = ? WHERE lock_id = ? AND owner_id = ? AND version = ?`, x.tableFullName)
+	execContext, err := x.db.ExecContext(ctx, insertSql, newVersion, lockInformation.ToJsonString(), lockId, lockInformation.OwnerId, exceptedVersion)
 	if err != nil {
 		return err
 	}
@@ -197,9 +198,9 @@ func (x *SqlServerStorage) UpdateWithVersion(ctx context.Context, lockId string,
 	return nil
 }
 
-func (x *SqlServerStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation, lockInformationJsonString string) error {
-	insertSql := fmt.Sprintf(`INSERT INTO %s (lock_id, version, lock_information_json_string) VALUES (?, ?, ?)`, x.tableFullName)
-	execContext, err := x.db.ExecContext(ctx, insertSql, lockId, version, lockInformationJsonString)
+func (x *SqlServerStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation) error {
+	insertSql := fmt.Sprintf(`INSERT INTO %s (lock_id, owner_id, version, lock_information_json_string) VALUES (?, ?, ?, ?)`, x.tableFullName)
+	execContext, err := x.db.ExecContext(ctx, insertSql, lockId, lockInformation.OwnerId, version, lockInformation.ToJsonString())
 	if err != nil {
 		return err
 	}
@@ -214,8 +215,8 @@ func (x *SqlServerStorage) InsertWithVersion(ctx context.Context, lockId string,
 }
 
 func (x *SqlServerStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version, lockInformation *LockInformation) error {
-	deleteSql := fmt.Sprintf(`DELETE FROM %s WHERE lock_id = ? AND version = ?`, x.tableFullName)
-	execContext, err := x.db.ExecContext(ctx, deleteSql, lockId, exceptedVersion)
+	deleteSql := fmt.Sprintf(`DELETE FROM %s WHERE lock_id = ? AND owner_id = ? AND version = ?`, x.tableFullName)
+	execContext, err := x.db.ExecContext(ctx, deleteSql, lockId, lockInformation.OwnerId, exceptedVersion)
 	if err != nil {
 		return err
 	}

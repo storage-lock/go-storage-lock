@@ -62,18 +62,19 @@ func TestMongoStorage_UpdateWithVersion(t *testing.T) {
 	lockId := ""
 	var exceptedVersion Version = 1
 	var newVersion Version = 2
-	lockInformationJsonString := ""
+
+	lockInformation := getTestLockInformation(t)
 
 	storage := getTestMongoStorage(t)
 
 	// 先保存锁的信息
-	err := storage.UpdateWithVersion(context.Background(), lockId, exceptedVersion, newVersion, lockInformationJsonString)
+	err := storage.UpdateWithVersion(context.Background(), lockId, exceptedVersion, newVersion, lockInformation)
 	assert.Nil(t, err)
 
 	// 然后再查询锁的信息，看看跟更新的时候能够对得上以检查更新是否成功
 	lockInformationJsonStringResult, err := storage.Get(context.Background(), lockId)
 	assert.Nil(t, err)
-	assert.Equal(t, lockInformationJsonString, lockInformationJsonStringResult)
+	assert.Equal(t, lockInformation, lockInformationJsonStringResult)
 }
 
 func TestNewMongoConfigurationConnectionGetter(t *testing.T) {

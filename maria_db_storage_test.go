@@ -42,7 +42,8 @@ func TestMariaDbStorage_DeleteWithVersion(t *testing.T) {
 	testEnsureLockNotExists(t, storage, testStorageLockId)
 
 	// 先插入一条
-	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, getTestLockInformationJsonString(t))
+	lockInformation := getTestLockInformation(t)
+	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, lockInformation)
 	assert.Nil(t, err)
 
 	// 确认能够查询得到
@@ -51,7 +52,7 @@ func TestMariaDbStorage_DeleteWithVersion(t *testing.T) {
 	assert.NotEmpty(t, lockInformationJsonString)
 
 	// 再尝试将这一条删除
-	err = storage.DeleteWithVersion(context.Background(), testStorageLockId, testStorageVersion)
+	err = storage.DeleteWithVersion(context.Background(), testStorageLockId, testStorageVersion, lockInformation)
 	assert.Nil(t, err)
 
 	// 然后再查询，应该就查不到了
@@ -71,7 +72,7 @@ func TestMariaDbStorage_Get(t *testing.T) {
 
 	testEnsureLockNotExists(t, storage, testStorageLockId)
 
-	lockInformationJsonString := getTestLockInformationJsonString(t)
+	lockInformationJsonString := getTestLockInformation(t)
 	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, lockInformationJsonString)
 	assert.Nil(t, err)
 
@@ -112,7 +113,7 @@ func TestMariaDbStorage_InsertWithVersion(t *testing.T) {
 
 	testEnsureLockNotExists(t, storage, testStorageLockId)
 
-	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, getTestLockInformationJsonString(t))
+	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, getTestLockInformation(t))
 	assert.Nil(t, err)
 }
 
@@ -125,11 +126,11 @@ func TestMariaDbStorage_UpdateWithVersion(t *testing.T) {
 
 	testEnsureLockNotExists(t, storage, testStorageLockId)
 
-	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, getTestLockInformationJsonString(t))
+	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, getTestLockInformation(t))
 	assert.Nil(t, err)
 
 	newVersion := Version(testStorageVersion + 1)
-	err = storage.UpdateWithVersion(context.Background(), testStorageLockId, testStorageVersion, newVersion, getTestLockInformationJsonString(t, newVersion))
+	err = storage.UpdateWithVersion(context.Background(), testStorageLockId, testStorageVersion, newVersion, getTestLockInformation(t, newVersion))
 	assert.Nil(t, err)
 
 }

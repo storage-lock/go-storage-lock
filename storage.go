@@ -19,15 +19,12 @@ type Storage interface {
 	// lockId 表示锁的ID
 	// exceptedValue 仅当老的值为这个时才进行更新
 	// newValue 更新为的新的值
-	//UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation, lockInformationJsonString string) error
-	UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation, lockInformationJsonString string) error
+	UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation) error
 
 	// InsertWithVersion 尝试将锁的信息插入到存储介质中，返回是否插入成功
-	//InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation, lockInformationJsonString string) error
-	InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation, lockInformationJsonString string) error
+	InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation) error
 
 	// DeleteWithVersion 如果锁的当前版本是期望的版本，则将其删除
-	//DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version, lockInformation *LockInformation) error
 	DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version, lockInformation *LockInformation) error
 
 	// Get 获取锁之前存储的值，如果没有的话则返回空字符串，如果发生了错误则返回对应的错误信息

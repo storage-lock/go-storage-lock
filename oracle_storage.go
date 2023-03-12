@@ -22,12 +22,12 @@ func (x *OracleStorage) Init(ctx context.Context) error {
 	panic("implement me")
 }
 
-func (x *OracleStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation, lockInformationJsonString string) error {
+func (x *OracleStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation) error {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (x *OracleStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation, lockInformationJsonString string) error {
+func (x *OracleStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation) error {
 	//TODO implement me
 	panic("implement me")
 }

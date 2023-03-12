@@ -144,9 +144,9 @@ func (x *MySQLStorage) Init(ctx context.Context) error {
 	return nil
 }
 
-func (x *MySQLStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation, lockInformationJsonString string) error {
+func (x *MySQLStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation) error {
 	insertSql := fmt.Sprintf(`UPDATE %s SET version = ?, lock_information_json_string = ? WHERE lock_id = ? AND version = ?`, x.tableFullName)
-	execContext, err := x.db.ExecContext(ctx, insertSql, newVersion, lockInformationJsonString, lockId, exceptedVersion)
+	execContext, err := x.db.ExecContext(ctx, insertSql, newVersion, lockInformation.ToJsonString(), lockId, exceptedVersion)
 	if err != nil {
 		return err
 	}
@@ -160,9 +160,9 @@ func (x *MySQLStorage) UpdateWithVersion(ctx context.Context, lockId string, exc
 	return nil
 }
 
-func (x *MySQLStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation, lockInformationJsonString string) error {
+func (x *MySQLStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation) error {
 	insertSql := fmt.Sprintf(`INSERT INTO %s (lock_id, version, lock_information_json_string) VALUES (?, ?, ?)`, x.tableFullName)
-	execContext, err := x.db.ExecContext(ctx, insertSql, lockId, version, lockInformationJsonString)
+	execContext, err := x.db.ExecContext(ctx, insertSql, lockId, version, lockInformation.ToJsonString())
 	if err != nil {
 		return err
 	}

@@ -42,7 +42,8 @@ func TestSqlServerStorage_DeleteWithVersion(t *testing.T) {
 	testEnsureLockNotExists(t, storage, testStorageLockId)
 
 	// 先插入一条
-	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, getTestLockInformationJsonString(t))
+	lockInformation := getTestLockInformation(t)
+	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, lockInformation)
 	assert.Nil(t, err)
 
 	// 确认能够查询得到
@@ -51,7 +52,7 @@ func TestSqlServerStorage_DeleteWithVersion(t *testing.T) {
 	assert.NotEmpty(t, lockInformationJsonString)
 
 	// 再尝试将这一条删除
-	err = storage.DeleteWithVersion(context.Background(), testStorageLockId, testStorageVersion)
+	err = storage.DeleteWithVersion(context.Background(), testStorageLockId, testStorageVersion, lockInformation)
 	assert.Nil(t, err)
 
 	// 然后再查询，应该就查不到了
@@ -71,13 +72,14 @@ func TestSqlServerStorage_Get(t *testing.T) {
 
 	testEnsureLockNotExists(t, storage, testStorageLockId)
 
-	lockInformationJsonString := getTestLockInformationJsonString(t)
-	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, lockInformationJsonString)
+	lockInformation := getTestLockInformation(t)
+	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, lockInformation)
 	assert.Nil(t, err)
 
-	lockInformationJsonStringRs, err := storage.Get(context.Background(), testStorageLockId)
+	lockInformationResult, err := storage.Get(context.Background(), testStorageLockId)
 	assert.Nil(t, err)
-	assert.Equal(t, lockInformationJsonString, lockInformationJsonStringRs)
+	assert.NotNil(t, lockInformationResult)
+	assert.Equal(t, lockInformation.ToJsonString(), lockInformationResult)
 
 }
 
@@ -112,7 +114,8 @@ func TestSqlServerStorage_InsertWithVersion(t *testing.T) {
 
 	testEnsureLockNotExists(t, storage, testStorageLockId)
 
-	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, getTestLockInformationJsonString(t))
+	lockInformation := getTestLockInformation(t)
+	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, lockInformation)
 	assert.Nil(t, err)
 }
 
@@ -125,11 +128,11 @@ func TestSqlServerStorage_UpdateWithVersion(t *testing.T) {
 
 	testEnsureLockNotExists(t, storage, testStorageLockId)
 
-	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, getTestLockInformationJsonString(t))
+	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, getTestLockInformation(t))
 	assert.Nil(t, err)
 
 	newVersion := Version(testStorageVersion + 1)
-	err = storage.UpdateWithVersion(context.Background(), testStorageLockId, testStorageVersion, newVersion, getTestLockInformationJsonString(t, newVersion))
+	err = storage.UpdateWithVersion(context.Background(), testStorageLockId, testStorageVersion, newVersion, getTestLockInformation(t, newVersion))
 	assert.Nil(t, err)
 
 }
@@ -140,9 +143,10 @@ func getTestSqlServerStorage(t *testing.T) *SqlServerStorage {
 	dsn := os.Getenv(envName)
 	assert.NotEmpty(t, dsn)
 	connectionGetter := NewSqlServerStorageConnectionGetterFromDSN(dsn)
-	storage := NewSqlServerStorage(&SqlServerStorageOptions{
+	storage, err := NewSqlServerStorage(context.Background(), &SqlServerStorageOptions{
 		ConnectionGetter: connectionGetter,
 		TableName:        "storage_lock_test",
 	})
+	assert.Nil(t, err)
 	return storage
 }
