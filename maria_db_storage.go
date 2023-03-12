@@ -10,6 +10,30 @@ import (
 
 // ------------------------------------------------- --------------------------------------------------------------------
 
+// NewMariaDBStorageLock 高层API，使用默认配置快速创建基于MariaDB的分布式锁
+func NewMariaDBStorageLock(ctx context.Context, lockId string, dsn string) (*StorageLock, error) {
+	connectionGetter := NewMariaStorageConnectionGetterFromDSN(dsn)
+	storageOptions := &MariaStorageOptions{
+		ConnectionGetter: connectionGetter,
+		TableName:        DefaultStorageTableName,
+	}
+
+	storage, err := NewMariaDbStorage(ctx, storageOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	lockOptions := &StorageLockOptions{
+		LockId:                lockId,
+		LeaseExpireAfter:      DefaultLeaseExpireAfter,
+		LeaseRefreshInterval:  DefaultLeaseRefreshInterval,
+		VersionMissRetryTimes: DefaultVersionMissRetryTimes,
+	}
+	return NewStorageLock(storage, lockOptions), nil
+}
+
+// ------------------------------------------------- --------------------------------------------------------------------
+
 // MariaStorageConnectionGetter 创建一个Maria的连接
 type MariaStorageConnectionGetter struct {
 	*MySQLStorageConnectionGetter

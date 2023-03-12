@@ -87,7 +87,6 @@ func TestNewMongoConfigurationConnectionGetter(t *testing.T) {
 func TestNewMongoStorage(t *testing.T) {
 	storage := NewMongoStorage(&MongoStorageOptions{
 		ConnectionGetter: NewMongoConfigurationConnectionGetter(""),
-		DatabaseName:     "",
 		CollectionName:   "",
 	})
 	assert.NotNil(t, storage)
@@ -96,7 +95,6 @@ func TestNewMongoStorage(t *testing.T) {
 func getTestMongoStorage(t *testing.T) *MongoStorage {
 	storage := NewMongoStorage(&MongoStorageOptions{
 		ConnectionGetter: NewMongoConfigurationConnectionGetter(""),
-		DatabaseName:     "",
 		CollectionName:   "",
 	})
 	assert.NotNil(t, storage)

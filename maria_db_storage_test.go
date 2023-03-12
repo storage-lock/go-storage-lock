@@ -72,13 +72,13 @@ func TestMariaDbStorage_Get(t *testing.T) {
 
 	testEnsureLockNotExists(t, storage, testStorageLockId)
 
-	lockInformationJsonString := getTestLockInformation(t)
-	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, lockInformationJsonString)
+	lockInformation := getTestLockInformation(t)
+	err = storage.InsertWithVersion(context.Background(), testStorageLockId, testStorageVersion, lockInformation)
 	assert.Nil(t, err)
 
 	lockInformationJsonStringRs, err := storage.Get(context.Background(), testStorageLockId)
 	assert.Nil(t, err)
-	assert.Equal(t, lockInformationJsonString, lockInformationJsonStringRs)
+	assert.Equal(t, lockInformation.ToJsonString(), lockInformationJsonStringRs)
 
 }
 

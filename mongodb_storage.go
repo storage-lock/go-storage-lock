@@ -75,9 +75,6 @@ type MongoStorageOptions struct {
 	// 获取连接
 	ConnectionGetter ConnectionGetter[*mongo.Client]
 
-	// 数据库名称
-	DatabaseName string
-
 	// 集合名称
 	CollectionName string
 }
@@ -102,24 +99,25 @@ func NewMongoStorage(options *MongoStorageOptions) *MongoStorage {
 }
 
 func (x *MongoStorage) Init(ctx context.Context) error {
-	client, err := x.options.ConnectionGetter.Get(ctx)
-	if err != nil {
-		return err
-	}
-	database := client.Database(x.options.DatabaseName)
-	if database == nil {
-		// TODO
-		return nil
-	}
-	database.Collection("")
-
-	// 初始化
-	session, err := x.client.StartSession()
-	if err != nil {
-		return err
-	}
-	x.session = session
-	return nil
+	//client, err := x.options.ConnectionGetter.Get(ctx)
+	//if err != nil {
+	//	return err
+	//}
+	//database := client.Database(x.options.DatabaseName)
+	//if database == nil {
+	//	// TODO
+	//	return nil
+	//}
+	//database.Collection("")
+	//
+	//// 初始化
+	//session, err := x.client.StartSession()
+	//if err != nil {
+	//	return err
+	//}
+	//x.session = session
+	//return nil
+	panic("not implemented")
 }
 
 func (x *MongoStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation) error {
