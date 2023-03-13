@@ -10,7 +10,7 @@
 
 # 二、 存储介质的支持
 
-- [x] [MySQL](./#3.1 MySQL)
+- [x] [MySQL](#3.1%20MySQL)
 - [x] [MariaDB](./#3.6 MariaDB)
 - [ ] TiDB
 - [x] [PostgreSQL](#3.2 Postgresql)
