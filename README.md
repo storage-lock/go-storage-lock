@@ -10,12 +10,12 @@
 
 # 二、 存储介质的支持
 
-- [x] [MySQL](#3.1%20MySQL)
-- [x] [MariaDB](./#3.6%20MariaDB)
+- [x] [MySQL](#3.1-MySQL)
+- [x] [MariaDB](./#3.6-MariaDB)
 - [ ] TiDB
-- [x] [PostgreSQL](#3.2%20Postgresql)
-- [x] [SQLServer](#3.3%20SQLServer)
-- [x] [Mongo ](#3.4%20Mongo)
+- [x] [PostgreSQL](#3.2-Postgresql)
+- [x] [SQLServer](#3.3-SQLServer)
+- [x] [Mongo ](#3.4-Mongo)
 - [ ] Redis
 - [ ] Splunk
 - [ ] Oracle
