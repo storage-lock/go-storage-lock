@@ -1,7 +1,10 @@
 package storage_lock
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
+	"errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -12,14 +15,15 @@ import (
 // ------------------------------------------------- --------------------------------------------------------------------
 
 // NewMongoStorageLock 高层API，使用默认配置快速创建基于Mongo的分布式锁
-func NewMongoStorageLock(ctx context.Context, lockId string, dsn string) (*StorageLock, error) {
-	connectionGetter := NewSqlServerStorageConnectionGetterFromDSN(dsn)
-	storageOptions := &SqlServerStorageOptions{
+func NewMongoStorageLock(ctx context.Context, lockId string, uri string) (*StorageLock, error) {
+	connectionGetter := NewMongoConfigurationConnectionGetter(uri)
+	storageOptions := &MongoStorageOptions{
 		ConnectionGetter: connectionGetter,
-		TableName:        DefaultStorageTableName,
+		DatabaseName:     DefaultStorageTableName,
+		CollectionName:   DefaultStorageTableName,
 	}
 
-	storage, err := NewSqlServerStorage(ctx, storageOptions)
+	storage, err := NewMongoStorage(ctx, storageOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -35,8 +39,8 @@ func NewMongoStorageLock(ctx context.Context, lockId string, dsn string) (*Stora
 
 // ------------------------------------------------ ---------------------------------------------------------------------
 
-// MongoConfigurationConnectionGetter 根据URI连接Mongo服务器获取连接
-type MongoConfigurationConnectionGetter struct {
+// MongoStorageConnectionGetter 根据URI连接Mongo服务器获取连接
+type MongoStorageConnectionGetter struct {
 
 	// 连接到数据库的选项
 	URI string
@@ -47,15 +51,15 @@ type MongoConfigurationConnectionGetter struct {
 	client     *mongo.Client
 }
 
-var _ ConnectionGetter[*mongo.Client] = &MongoConfigurationConnectionGetter{}
+var _ ConnectionGetter[*mongo.Client] = &MongoStorageConnectionGetter{}
 
-func NewMongoConfigurationConnectionGetter(uri string) *MongoConfigurationConnectionGetter {
-	return &MongoConfigurationConnectionGetter{
+func NewMongoConfigurationConnectionGetter(uri string) *MongoStorageConnectionGetter {
+	return &MongoStorageConnectionGetter{
 		URI: uri,
 	}
 }
 
-func (x *MongoConfigurationConnectionGetter) Get(ctx context.Context) (*mongo.Client, error) {
+func (x *MongoStorageConnectionGetter) Get(ctx context.Context) (*mongo.Client, error) {
 	x.clientOnce.Do(func() {
 		client, err := mongo.Connect(ctx, options.Client().ApplyURI(x.URI))
 		if err != nil {
@@ -75,6 +79,9 @@ type MongoStorageOptions struct {
 	// 获取连接
 	ConnectionGetter ConnectionGetter[*mongo.Client]
 
+	// 要存储到的数据库的名称
+	DatabaseName string
+
 	// 集合名称
 	CollectionName string
 }
@@ -85,6 +92,7 @@ type MongoStorage struct {
 	options *MongoStorageOptions
 
 	client     *mongo.Client
+	database   *mongo.Database
 	collection *mongo.Collection
 
 	session mongo.Session
@@ -92,32 +100,39 @@ type MongoStorage struct {
 
 var _ Storage = &MongoStorage{}
 
-func NewMongoStorage(options *MongoStorageOptions) *MongoStorage {
-	return &MongoStorage{
+func NewMongoStorage(ctx context.Context, options *MongoStorageOptions) (*MongoStorage, error) {
+	storage := &MongoStorage{
 		options: options,
 	}
+
+	err := storage.Init(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return storage, nil
 }
 
 func (x *MongoStorage) Init(ctx context.Context) error {
-	//client, err := x.options.ConnectionGetter.Get(ctx)
-	//if err != nil {
-	//	return err
-	//}
-	//database := client.Database(x.options.DatabaseName)
-	//if database == nil {
-	//	// TODO
-	//	return nil
-	//}
-	//database.Collection("")
-	//
-	//// 初始化
-	//session, err := x.client.StartSession()
-	//if err != nil {
-	//	return err
-	//}
-	//x.session = session
-	//return nil
-	panic("not implemented")
+
+	client, err := x.options.ConnectionGetter.Get(ctx)
+	if err != nil {
+		return err
+	}
+	database := client.Database(x.options.DatabaseName)
+	collection := database.Collection(x.options.CollectionName)
+	// 初始化
+	session, err := client.StartSession()
+	if err != nil {
+		return err
+	}
+
+	x.client = client
+	x.session = session
+	x.database = database
+	x.collection = collection
+
+	return nil
 }
 
 func (x *MongoStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation) error {
@@ -132,10 +147,13 @@ func (x *MongoStorage) UpdateWithVersion(ctx context.Context, lockId string, exc
 			"$eq": exceptedVersion,
 		},
 	}
-	rs, err := x.collection.UpdateOne(ctx, filter, &MongoLock{
-		ID:             lockId,
-		Version:        newVersion,
-		LockJsonString: lockInformation.ToJsonString(),
+	rs, err := x.collection.UpdateOne(ctx, filter, bson.M{
+		"$set": &MongoLock{
+			ID:             lockId,
+			OwnerId:        lockInformation.OwnerId,
+			Version:        newVersion,
+			LockJsonString: lockInformation.ToJsonString(),
+		},
 	})
 	if err != nil {
 		return err
@@ -178,6 +196,14 @@ func (x *MongoStorage) DeleteWithVersion(ctx context.Context, lockId string, exc
 	return nil
 }
 
+func IntToBytes(n int) []byte {
+	x := int32(n)
+
+	bytesBuffer := bytes.NewBuffer([]byte{})
+	binary.Write(bytesBuffer, binary.BigEndian, x)
+	return bytesBuffer.Bytes()
+}
+
 func (x *MongoStorage) Get(ctx context.Context, lockId string) (string, error) {
 	filter := bson.M{
 		"_id": bson.M{
@@ -186,19 +212,22 @@ func (x *MongoStorage) Get(ctx context.Context, lockId string) (string, error) {
 	}
 	one := x.collection.FindOne(ctx, filter)
 	if one.Err() != nil {
+		if errors.Is(one.Err(), mongo.ErrNoDocuments) {
+			return "", ErrLockNotFound
+		}
 		return "", one.Err()
 	}
-	bytes, err := one.DecodeBytes()
+	mongoLock := &MongoLock{}
+	err := one.Decode(mongoLock)
 	if err != nil {
 		return "", err
 	}
-	return string(bytes), nil
+	return mongoLock.LockJsonString, nil
 }
 
 func (x *MongoStorage) GetTime(ctx context.Context) (time.Time, error) {
-	// TODO 待定
-	//x.session.ClusterTime()
-	return time.Time{}, nil
+	// TODO 日了狗啊，到底该怎么拿Mongo服务器时间啊
+	return time.Now(), nil
 }
 
 func (x *MongoStorage) Close(ctx context.Context) error {
@@ -217,7 +246,7 @@ type MongoLock struct {
 	ID string `bson:"_id"`
 
 	// 锁的当前持有者的ID
-	OwnerId string `bson:"ownerId"`
+	OwnerId string `bson:"owner_id"`
 
 	// 锁的版本，每次修改都会增加1
 	Version Version `bson:"version"`
