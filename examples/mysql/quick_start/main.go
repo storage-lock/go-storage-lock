@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	storage_lock "github.com/golang-infrastructure/go-storage-lock"
+	"github.com/golang-infrastructure/go-storage-lock/lock"
 	"strings"
 	"sync"
 	"time"
@@ -12,16 +12,18 @@ import (
 func main() {
 
 	// Docker启动MySQL：
+	// docker rm -f storage-lock-mysql
 	// docker run -itd --name storage-lock-mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=UeGqAm8CxYGldMDLoNNt mysql:5.7
 
-	// DSN的写法参考驱动的支持：github.com/go-sql-driver/mysql
-	dsn := "root:UeGqAm8CxYGldMDLoNNt@tcp(192.168.128.206:3306)/storage_lock_test"
+	// DSN的写法参考驱动的支docker run -itd --name storage-lock-mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=UeGqAm8CxYGldMDLoNNt mysql:5.7
+	//持：github.com/go-sql-driver/mysql
+	dsn := "root:UeGqAm8CxYGldMDLoNNt@tcp(192.168.86.130:3306)/storage_lock_test"
 
 	// 这个是最为重要的，通常是要锁住的资源的名称
 	lockId := "must-serial-operation-resource-foo"
 
 	// 第一步创建一把分布式锁
-	lock, err := storage_lock.NewMySQLStorageLock(context.Background(), lockId, dsn)
+	lock, err := lock.NewMySQLStorageLock(context.Background(), lockId, dsn)
 	if err != nil {
 		fmt.Printf("[ %s ] Create Lock Failed: %v\n", time.Now().Format("2006-01-02 15:04:05"), err)
 		return
