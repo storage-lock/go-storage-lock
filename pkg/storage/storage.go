@@ -36,6 +36,7 @@ type Storage interface {
 
 	// GetTime 分布式锁的话时间必须统一使用Storage的时间，所以Storage要能够提供时间查询的功能
 	// 这是因为分布式锁的算法需要根据时间来协调推进，而当时间不准确的时候算法可能会失效从而导致锁失效
+	// TODO 2023-5-15 01:48:19 基于实例的时间在分布式数据库中可能会失效，单实例没问题
 	GetTime(ctx context.Context) (time.Time, error)
 
 	// Close 关闭此存储介质
