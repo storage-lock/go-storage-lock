@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	storage_lock "github.com/golang-infrastructure/go-storage-lock"
+	"github.com/storage-lock/go-storage-lock/pkg/locks"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +20,7 @@ func main() {
 	lockId := "must-serial-operation-resource-foo"
 
 	// 第一步创建一把分布式锁
-	lock, err := storage_lock.NewMongoStorageLock(context.Background(), lockId, uri)
+	lock, err := locks.NewMongoStorageLock(context.Background(), lockId, uri)
 	if err != nil {
 		fmt.Printf("[ %s ] Create Lock Failed: %v\n", time.Now().Format("2006-01-02 15:04:05"), err)
 		return

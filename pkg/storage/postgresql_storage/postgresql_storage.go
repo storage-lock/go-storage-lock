@@ -5,126 +5,16 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sync"
+	"github.com/golang-infrastructure/go-iterator"
+	"github.com/storage-lock/go-storage-lock/pkg/storage"
+	"github.com/storage-lock/go-storage-lock/pkg/storage/base"
+	"github.com/storage-lock/go-storage-lock/pkg/storage_lock"
 	"time"
 
 	_ "github.com/lib/pq"
 )
 
-// ------------------------------------------------- --------------------------------------------------------------------
-
-// NewPostgreSQLStorageLock 高层API，使用默认配置快速创建基于PostgreSQL的分布式锁
-func NewPostgreSQLStorageLock(ctx context.Context, lockId string, dsn string, schema ...string) (*StorageLock, error) {
-	connectionGetter := NewPostgreSQLStorageConnectionGetterFromDSN(dsn)
-	storageOptions := &PostgreSQLStorageOptions{
-		ConnectionGetter: connectionGetter,
-		TableName:        DefaultStorageTableName,
-	}
-
-	if len(schema) != 0 {
-		storageOptions.Schema = schema[0]
-	}
-
-	storage, err := NewPostgreSQLStorage(ctx, storageOptions)
-	if err != nil {
-		return nil, err
-	}
-
-	lockOptions := &StorageLockOptions{
-		LockId:                lockId,
-		LeaseExpireAfter:      DefaultLeaseExpireAfter,
-		LeaseRefreshInterval:  DefaultLeaseRefreshInterval,
-		VersionMissRetryTimes: DefaultVersionMissRetryTimes,
-	}
-	return NewStorageLock(storage, lockOptions), nil
-}
-
-// ------------------------------------------------- --------------------------------------------------------------------
-
-type PostgreSQLStorageConnectionGetter struct {
-
-	// 主机的名字
-	Host string
-
-	// 主机的端口
-	Port uint
-
-	// 用户名
-	User string
-
-	// 密码
-	Passwd string
-
-	DatabaseName string
-
-	// DSN
-	// Example: "host=192.168.128.206 user=postgres password=123456 port=5432 dbname=postgres sslmode=disable"
-	DSN string
-
-	// 初始化好的数据库实例
-	db   *sql.DB
-	err  error
-	once sync.Once
-}
-
-var _ ConnectionGetter[*sql.DB] = &PostgreSQLStorageConnectionGetter{}
-
-// NewPostgreSQLStorageConnectionGetterFromDSN 从DSN创建MySQL连接
-func NewPostgreSQLStorageConnectionGetterFromDSN(dsn string) *PostgreSQLStorageConnectionGetter {
-	return &PostgreSQLStorageConnectionGetter{
-		DSN: dsn,
-	}
-}
-
-// NewPostgreSQLStorageConnectionGetter 从服务器属性创建数据库连接
-func NewPostgreSQLStorageConnectionGetter(host string, port uint, user, passwd, databaseName string) *PostgreSQLStorageConnectionGetter {
-	return &PostgreSQLStorageConnectionGetter{
-		Host:         host,
-		Port:         port,
-		User:         user,
-		Passwd:       passwd,
-		DatabaseName: databaseName,
-	}
-}
-
-// Get 获取到数据库的连接
-func (x *PostgreSQLStorageConnectionGetter) Get(ctx context.Context) (*sql.DB, error) {
-	x.once.Do(func() {
-		db, err := sql.Open("postgres", x.GetDSN())
-		if err != nil {
-			x.err = err
-			return
-		}
-		x.db = db
-	})
-	return x.db, x.err
-}
-
-func (x *PostgreSQLStorageConnectionGetter) GetDSN() string {
-	if x.DSN != "" {
-		return x.DSN
-	}
-	return fmt.Sprintf("host=%s user=%s password=%s port=%d dbname=%s sslmode=disable", x.Host, x.User, x.Passwd, x.Port, x.DatabaseName)
-}
-
-// ------------------------------------------------- --------------------------------------------------------------------
-
-const DefaultPostgreSQLStorageSchema = "public"
-
-type PostgreSQLStorageOptions struct {
-
-	// 存在哪个schema下，默认是public
-	Schema string
-
-	// 存放锁的表的名字
-	TableName string
-
-	// 用于获取数据库连接
-	ConnectionGetter ConnectionGetter[*sql.DB]
-}
-
-// ------------------------------------------------- --------------------------------------------------------------------
-
+// PostgreSQLStorage 基于Postgresql作为存储引擎
 type PostgreSQLStorage struct {
 	options *PostgreSQLStorageOptions
 
@@ -132,23 +22,27 @@ type PostgreSQLStorage struct {
 	tableFullName string
 }
 
-var _ Storage = &PostgreSQLStorage{}
+var _ storage.Storage = &PostgreSQLStorage{}
 
 func NewPostgreSQLStorage(ctx context.Context, options *PostgreSQLStorageOptions) (*PostgreSQLStorage, error) {
-	storage := &PostgreSQLStorage{
+	s := &PostgreSQLStorage{
 		options: options,
 	}
 
-	err := storage.Init(ctx)
+	err := s.Init(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return storage, nil
+	return s, nil
+}
+
+func (x *PostgreSQLStorage) GetName() string {
+	return "postgresql-storage"
 }
 
 func (x *PostgreSQLStorage) Init(ctx context.Context) error {
-	db, err := x.options.ConnectionGetter.Get(ctx)
+	db, err := x.options.ConnectionProvider.Get(ctx)
 	if err != nil {
 		return err
 	}
@@ -189,7 +83,7 @@ func (x *PostgreSQLStorage) Init(ctx context.Context) error {
 	return nil
 }
 
-func (x *PostgreSQLStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation) error {
+func (x *PostgreSQLStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion storage.Version, lockInformation *storage.LockInformation) error {
 	insertSql := fmt.Sprintf(`UPDATE %s SET version = $1, lock_information_json_string = $2 WHERE lock_id = $3 AND owner_id = $4 AND version = $5`, x.tableFullName)
 	execContext, err := x.db.ExecContext(ctx, insertSql, newVersion, lockInformation.ToJsonString(), lockId, lockInformation.OwnerId, exceptedVersion)
 	if err != nil {
@@ -200,12 +94,12 @@ func (x *PostgreSQLStorage) UpdateWithVersion(ctx context.Context, lockId string
 		return err
 	}
 	if affected == 0 {
-		return ErrVersionMiss
+		return storage_lock.ErrVersionMiss
 	}
 	return nil
 }
 
-func (x *PostgreSQLStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation) error {
+func (x *PostgreSQLStorage) InsertWithVersion(ctx context.Context, lockId string, version storage.Version, lockInformation *storage.LockInformation) error {
 	insertSql := fmt.Sprintf(`INSERT INTO %s (lock_id, owner_id, version, lock_information_json_string) VALUES ($1, $2, $3, $4)`, x.tableFullName)
 	execContext, err := x.db.ExecContext(ctx, insertSql, lockId, lockInformation.OwnerId, version, lockInformation.ToJsonString())
 	if err != nil {
@@ -216,12 +110,12 @@ func (x *PostgreSQLStorage) InsertWithVersion(ctx context.Context, lockId string
 		return err
 	}
 	if affected == 0 {
-		return ErrVersionMiss
+		return storage_lock.ErrVersionMiss
 	}
 	return nil
 }
 
-func (x *PostgreSQLStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version, lockInformation *LockInformation) error {
+func (x *PostgreSQLStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion storage.Version, lockInformation *storage.LockInformation) error {
 	deleteSql := fmt.Sprintf(`DELETE FROM %s WHERE lock_id = $1 AND owner_id = $2 AND version = $3`, x.tableFullName)
 	execContext, err := x.db.ExecContext(ctx, deleteSql, lockId, lockInformation.OwnerId, exceptedVersion)
 	if err != nil {
@@ -232,7 +126,7 @@ func (x *PostgreSQLStorage) DeleteWithVersion(ctx context.Context, lockId string
 		return err
 	}
 	if affected == 0 {
-		return ErrVersionMiss
+		return storage_lock.ErrVersionMiss
 	}
 	return nil
 }
@@ -247,7 +141,7 @@ func (x *PostgreSQLStorage) Get(ctx context.Context, lockId string) (string, err
 		_ = rs.Close()
 	}()
 	if !rs.Next() {
-		return "", ErrLockNotFound
+		return "", storage_lock.ErrLockNotFound
 	}
 	var lockInformationJsonString string
 	err = rs.Scan(&lockInformationJsonString)
@@ -267,7 +161,7 @@ func (x *PostgreSQLStorage) GetTime(ctx context.Context) (time.Time, error) {
 		_ = rs.Close()
 	}()
 	if !rs.Next() {
-		return zero, errors.New("rs server time failed")
+		return zero, errors.New("query postgresql server time failed")
 	}
 	var databaseTime time.Time
 	err = rs.Scan(&databaseTime)
@@ -283,4 +177,12 @@ func (x *PostgreSQLStorage) Close(ctx context.Context) error {
 		return nil
 	}
 	return x.db.Close()
+}
+
+func (x *PostgreSQLStorage) List(ctx context.Context) (iterator.Iterator[*storage.LockInformation], error) {
+	rows, err := x.db.Query("SELECT * FROM %s", x.tableFullName)
+	if err != nil {
+		return nil, err
+	}
+	return base.NewRowsIterator(rows), nil
 }

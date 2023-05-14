@@ -45,21 +45,25 @@ func (x *FuncConnectionProvider[Connection]) Get(ctx context.Context) (Connectio
 
 // ------------------------------------------------ ---------------------------------------------------------------------
 
-// ConfigurationConnectionGetter 根据配合获取连接
-type ConfigurationConnectionGetter[Connection any] struct {
+// ConfigurationConnectionProvider 根据配合获取连接
+type ConfigurationConnectionProvider[Connection any] struct {
 }
 
-var _ ConnectionProvider[any] = &ConfigurationConnectionGetter[any]{}
+var _ ConnectionProvider[any] = &ConfigurationConnectionProvider[any]{}
 
-func (x *ConfigurationConnectionGetter[Connection]) Get(ctx context.Context) (Connection, error) {
+func (x *ConfigurationConnectionProvider[Connection]) Name() string {
+	return "configuration-connection-provider"
+}
+
+func (x *ConfigurationConnectionProvider[Connection]) Get(ctx context.Context) (Connection, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
 // ------------------------------------------------ ---------------------------------------------------------------------
 
-// SQLStorageConnectionGetter 创建到SQL类型的数据库的连接
-type SQLStorageConnectionGetter struct {
+// SQLStorageConnectionProvider 创建到SQL类型的数据库的连接
+type SQLStorageConnectionProvider struct {
 
 	// 主机的名字
 	Host string
@@ -83,18 +87,18 @@ type SQLStorageConnectionGetter struct {
 	once sync.Once
 }
 
-var _ ConnectionProvider[*sql.DB] = &SQLStorageConnectionGetter{}
+var _ ConnectionProvider[*sql.DB] = &SQLStorageConnectionProvider{}
 
 // NewSQLStorageConnectionGetterFromDSN 从DSN创建MySQL连接
-func NewSQLStorageConnectionGetterFromDSN(dsn string) *SQLStorageConnectionGetter {
-	return &SQLStorageConnectionGetter{
+func NewSQLStorageConnectionGetterFromDSN(dsn string) *SQLStorageConnectionProvider {
+	return &SQLStorageConnectionProvider{
 		DSN: dsn,
 	}
 }
 
 // NewSQLStorageConnectionGetter 从服务器属性创建数据库连接
-func NewSQLStorageConnectionGetter(host string, port uint, user, passwd string) *SQLStorageConnectionGetter {
-	return &SQLStorageConnectionGetter{
+func NewSQLStorageConnectionGetter(host string, port uint, user, passwd string) *SQLStorageConnectionProvider {
+	return &SQLStorageConnectionProvider{
 		Host:   host,
 		Port:   port,
 		User:   user,
@@ -102,8 +106,12 @@ func NewSQLStorageConnectionGetter(host string, port uint, user, passwd string) 
 	}
 }
 
+func (x *SQLStorageConnectionProvider) Name() string {
+	return "sql-storage-connection-provider"
+}
+
 // Get 获取到数据库的连接
-func (x *SQLStorageConnectionGetter) Get(ctx context.Context) (*sql.DB, error) {
+func (x *SQLStorageConnectionProvider) Get(ctx context.Context) (*sql.DB, error) {
 	x.once.Do(func() {
 		// TODO 此处修改为具体的实现
 		db, err := sql.Open("mysql", x.DSN)

@@ -1,93 +1,19 @@
 package mongodb_storage
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
+	"github.com/golang-infrastructure/go-iterator"
+	"github.com/storage-lock/go-storage-lock/pkg/storage"
+	"github.com/storage-lock/go-storage-lock/pkg/storage_lock"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"sync"
 	"time"
 )
 
-// ------------------------------------------------- --------------------------------------------------------------------
-
-// NewMongoStorageLock 高层API，使用默认配置快速创建基于Mongo的分布式锁
-func NewMongoStorageLock(ctx context.Context, lockId string, uri string) (*StorageLock, error) {
-	connectionGetter := NewMongoConfigurationConnectionGetter(uri)
-	storageOptions := &MongoStorageOptions{
-		ConnectionGetter: connectionGetter,
-		DatabaseName:     DefaultStorageTableName,
-		CollectionName:   DefaultStorageTableName,
-	}
-
-	storage, err := NewMongoStorage(ctx, storageOptions)
-	if err != nil {
-		return nil, err
-	}
-
-	lockOptions := &StorageLockOptions{
-		LockId:                lockId,
-		LeaseExpireAfter:      DefaultLeaseExpireAfter,
-		LeaseRefreshInterval:  DefaultLeaseRefreshInterval,
-		VersionMissRetryTimes: DefaultVersionMissRetryTimes,
-	}
-	return NewStorageLock(storage, lockOptions), nil
-}
-
 // ------------------------------------------------ ---------------------------------------------------------------------
 
-// MongoStorageConnectionGetter 根据URI连接Mongo服务器获取连接
-type MongoStorageConnectionGetter struct {
-
-	// 连接到数据库的选项
-	URI string
-
-	// Mongo客户端
-	clientOnce sync.Once
-	err        error
-	client     *mongo.Client
-}
-
-var _ ConnectionGetter[*mongo.Client] = &MongoStorageConnectionGetter{}
-
-func NewMongoConfigurationConnectionGetter(uri string) *MongoStorageConnectionGetter {
-	return &MongoStorageConnectionGetter{
-		URI: uri,
-	}
-}
-
-func (x *MongoStorageConnectionGetter) Get(ctx context.Context) (*mongo.Client, error) {
-	x.clientOnce.Do(func() {
-		client, err := mongo.Connect(ctx, options.Client().ApplyURI(x.URI))
-		if err != nil {
-			x.err = err
-			return
-		}
-		x.client = client
-	})
-	return x.client, x.err
-}
-
-// ------------------------------------------------ ---------------------------------------------------------------------
-
-// MongoStorageOptions Mongo的存储选项
-type MongoStorageOptions struct {
-
-	// 获取连接
-	ConnectionGetter ConnectionGetter[*mongo.Client]
-
-	// 要存储到的数据库的名称
-	DatabaseName string
-
-	// 集合名称
-	CollectionName string
-}
-
-// ------------------------------------------------ ---------------------------------------------------------------------
-
+// MongoStorage MongoDB的存储引擎实现
 type MongoStorage struct {
 	options *MongoStorageOptions
 
@@ -98,24 +24,35 @@ type MongoStorage struct {
 	session mongo.Session
 }
 
-var _ Storage = &MongoStorage{}
+var _ storage.Storage = &MongoStorage{}
 
+// NewMongoStorage 创建一个基于MongoDB的存储引擎
 func NewMongoStorage(ctx context.Context, options *MongoStorageOptions) (*MongoStorage, error) {
-	storage := &MongoStorage{
+
+	s := &MongoStorage{
 		options: options,
 	}
 
-	err := storage.Init(ctx)
+	err := s.Init(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return storage, nil
+	return s, nil
+}
+
+func (x *MongoStorage) GetName() string {
+	return "mongodb-storage"
 }
 
 func (x *MongoStorage) Init(ctx context.Context) error {
 
-	client, err := x.options.ConnectionGetter.Get(ctx)
+	// 参数检查
+	if err := x.options.Check(); err != nil {
+		return err
+	}
+
+	client, err := x.options.ConnectionProvider.Get(ctx)
 	if err != nil {
 		return err
 	}
@@ -135,7 +72,7 @@ func (x *MongoStorage) Init(ctx context.Context) error {
 	return nil
 }
 
-func (x *MongoStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion Version, lockInformation *LockInformation) error {
+func (x *MongoStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion storage.Version, lockInformation *storage.LockInformation) error {
 	filter := bson.M{
 		"_id": bson.M{
 			"$eq": lockId,
@@ -159,13 +96,17 @@ func (x *MongoStorage) UpdateWithVersion(ctx context.Context, lockId string, exc
 		return err
 	}
 	if rs.ModifiedCount == 0 {
-		return ErrVersionMiss
+		// TODO 这里返回的错误是不够准确的，可能还会出现：
+		// 1. 锁不存在
+		// 2. 锁存在但是不属于这个owner
+		return storage_lock.ErrVersionMiss
 	}
 	return nil
 }
 
-func (x *MongoStorage) InsertWithVersion(ctx context.Context, lockId string, version Version, lockInformation *LockInformation) error {
+func (x *MongoStorage) InsertWithVersion(ctx context.Context, lockId string, version storage.Version, lockInformation *storage.LockInformation) error {
 	_, err := x.collection.InsertOne(ctx, &MongoLock{
+		// 锁的ID作为唯一约束，保证同一个锁锁只会存在一个
 		ID:             lockId,
 		OwnerId:        lockInformation.OwnerId,
 		Version:        version,
@@ -174,14 +115,17 @@ func (x *MongoStorage) InsertWithVersion(ctx context.Context, lockId string, ver
 	return err
 }
 
-func (x *MongoStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version, lockInformation *LockInformation) error {
+func (x *MongoStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion storage.Version, lockInformation *storage.LockInformation) error {
 	filter := bson.M{
+		// 按照锁的ID作为索引删除
 		"_id": bson.M{
 			"$eq": lockId,
 		},
+		// 删除的时候保证是自己持有的锁，否则不应该删除成功
 		"owner_id": bson.M{
 			"$eq": lockInformation.OwnerId,
 		},
+		// 删除的时候确保版本是匹配的，否则不应该删除成功
 		"version": bson.M{
 			"$eq": exceptedVersion,
 		},
@@ -191,18 +135,21 @@ func (x *MongoStorage) DeleteWithVersion(ctx context.Context, lockId string, exc
 		return err
 	}
 	if rs.DeletedCount == 0 {
-		return ErrVersionMiss
+		// TODO 这里返回的错误是不够准确的，可能还会出现：
+		// 1. 锁不存在
+		// 2. 锁存在但是不属于这个owner
+		return storage_lock.ErrVersionMiss
 	}
 	return nil
 }
 
-func IntToBytes(n int) []byte {
-	x := int32(n)
-
-	bytesBuffer := bytes.NewBuffer([]byte{})
-	binary.Write(bytesBuffer, binary.BigEndian, x)
-	return bytesBuffer.Bytes()
-}
+//// IntToBytes 把int转为字节数组
+//func IntToBytes(n int) []byte {
+//	x := int32(n)
+//	bytesBuffer := bytes.NewBuffer([]byte{})
+//	binary.Write(bytesBuffer, binary.BigEndian, x)
+//	return bytesBuffer.Bytes()
+//}
 
 func (x *MongoStorage) Get(ctx context.Context, lockId string) (string, error) {
 	filter := bson.M{
@@ -212,9 +159,11 @@ func (x *MongoStorage) Get(ctx context.Context, lockId string) (string, error) {
 	}
 	one := x.collection.FindOne(ctx, filter)
 	if one.Err() != nil {
+		// 把锁不存在的错误统一为接口规定的错误以便上层能够统一处理，上层就不需要关心具体的实现细节了
 		if errors.Is(one.Err(), mongo.ErrNoDocuments) {
-			return "", ErrLockNotFound
+			return "", storage_lock.ErrLockNotFound
 		}
+		// 如果是其它类型的错误，就直接返回了
 		return "", one.Err()
 	}
 	mongoLock := &MongoLock{}
@@ -226,7 +175,7 @@ func (x *MongoStorage) Get(ctx context.Context, lockId string) (string, error) {
 }
 
 func (x *MongoStorage) GetTime(ctx context.Context) (time.Time, error) {
-	// TODO 日了狗啊，到底该怎么拿Mongo服务器时间啊
+	// TODO 日了狗啊，到底该怎么拿Mongo服务器时间啊，或者随便找个NTP服务器来作为时间源？反正只要时间源统一就可以了...
 	return time.Now(), nil
 }
 
@@ -237,19 +186,27 @@ func (x *MongoStorage) Close(ctx context.Context) error {
 	return nil
 }
 
+func (x *MongoStorage) List(ctx context.Context) (iterator.Iterator[*storage.LockInformation], error) {
+	cursor, err := x.collection.Find(ctx, bson.M{})
+	if err != nil {
+		return nil, err
+	}
+	return NewListMongoLockIterator(cursor), nil
+}
+
 // ------------------------------------------------ ---------------------------------------------------------------------
 
 // MongoLock 锁在Mongo中存储的结构
 type MongoLock struct {
 
-	// 锁的ID，这个字段是一个唯一字段
+	// 锁的ID，这个字段是一个唯一字段，这个字段会作为Mongo中的Collection的主键字段，保证同一个锁同时只会存在一个
 	ID string `bson:"_id"`
 
 	// 锁的当前持有者的ID
 	OwnerId string `bson:"owner_id"`
 
 	// 锁的版本，每次修改都会增加1
-	Version Version `bson:"version"`
+	Version storage.Version `bson:"version"`
 
 	// 锁的json信息，存储着更上层的通用的锁的信息，这里只需要认为它是一个字符串就可以了
 	LockJsonString string `bson:"lock_json_string"`

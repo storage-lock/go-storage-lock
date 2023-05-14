@@ -1,22 +1,10 @@
 package memory_storage
 
 import (
-	"context"
-	"github.com/stretchr/testify/assert"
+	"github.com/storage-lock/go-storage-lock/pkg/storage/test_helper"
 	"testing"
 )
 
 func TestMemoryStorage(t *testing.T) {
-
-	lockId := "test-lock"
-
-	lock := NewStorageLockUseMemory(lockId)
-
-	ownerId := "test-owner"
-	err := lock.Lock(context.Background(), ownerId)
-	assert.Nil(t, err)
-
-	err = lock.UnLock(context.Background(), ownerId)
-	assert.Nil(t, err)
-
+	test_helper.TestStorage(t, NewMemoryStorage())
 }

@@ -43,6 +43,31 @@ func NewStorageLockOptions() *StorageLockOptions {
 	}
 }
 
+// NewStorageLockOptionsWithLockId 使用默认值创建配置项，同时指定锁的ID
+func NewStorageLockOptionsWithLockId(lockId string) *StorageLockOptions {
+	return NewStorageLockOptions().WithLockId(lockId)
+}
+
+func (x *StorageLockOptions) WithLockId(lockId string) *StorageLockOptions {
+	x.LockId = lockId
+	return x
+}
+
+func (x *StorageLockOptions) WithLeaseExpireAfter(leaseExpireAfter time.Duration) *StorageLockOptions {
+	x.LeaseExpireAfter = leaseExpireAfter
+	return x
+}
+
+func (x *StorageLockOptions) WithLeaseRefreshInterval(leaseRefreshInterval time.Duration) *StorageLockOptions {
+	x.LeaseRefreshInterval = leaseRefreshInterval
+	return x
+}
+
+func (x *StorageLockOptions) WithVersionMissRetryTimes(versionMissRetryTimes uint) *StorageLockOptions {
+	x.VersionMissRetryTimes = versionMissRetryTimes
+	return x
+}
+
 //// 返回下一个租约过期时间在哪一时刻
 //func (x *StorageLockOptions) nextLeaseExpireTime(ctx context.Context, storage Storage) time.Time {
 //	storage.GetTime(ctx)

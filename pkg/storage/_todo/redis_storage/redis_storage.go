@@ -24,7 +24,7 @@ package redis_storage
 //	client *redis.Client
 //}
 //
-//var _ ConnectionGetter[*redis.Client] = &RedisConfigurationConnectionGetter{}
+//var _ ConnectionProvider[*redis.Client] = &RedisConfigurationConnectionGetter{}
 //
 //func NewRedisConfigurationConnectionGetter(address, passwd string, db ...int) *RedisConfigurationConnectionGetter {
 //	if len(db) == 0 {
@@ -51,12 +51,12 @@ package redis_storage
 //// ------------------------------------------------ ---------------------------------------------------------------------
 //
 //type RedisStorage struct {
-//	connectionGetter ConnectionGetter[*redis.Client]
+//	connectionGetter ConnectionProvider[*redis.Client]
 //}
 //
 //var _ Storage = &RedisStorage{}
 //
-//func NewRedisStorage(connectionGetter ConnectionGetter[*redis.Client]) *RedisStorage {
+//func NewRedisStorage(connectionGetter ConnectionProvider[*redis.Client]) *RedisStorage {
 //	return &RedisStorage{
 //		connectionGetter: connectionGetter,
 //	}

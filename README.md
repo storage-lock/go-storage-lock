@@ -1,12 +1,12 @@
-# Storage Lock 
+# Storage Lock
+
+# TODO 2023-5-14 23:57:41 代码测试 & 文档重写
 
 # 一、这是什么？
 
 提出了一种通用的基于存储介质（比如数据库）的分布式锁算法并对进行了编码实现。
 
 提供的锁时抢占式的非公平锁，并提供可重入的特性。
-
-
 
 # 二、 存储介质的支持
 
@@ -15,7 +15,7 @@
 - [x] [SQLServer](#33-SQLServer)
 - [x] [Mongo ](#34-Mongo)
 - [x] [MariaDB](#36-mariadb)
-- [ ] TiDB
+- [x] TiDB
 - [ ] Redis
 - [ ] Splunk
 - [ ] Oracle
@@ -39,7 +39,7 @@ package main
 import (
 	"context"
 	"fmt"
-	storage_lock "github.com/golang-infrastructure/go-storage-lock"
+	storage_lock "github.com/storage-lock/go-storage-lock"
 	"strings"
 	"sync"
 	"time"
@@ -149,7 +149,7 @@ package main
 import (
 	"context"
 	"fmt"
-	storage_lock "github.com/golang-infrastructure/go-storage-lock"
+	storage_lock "github.com/storage-lock/go-storage-lock"
 	"strings"
 	"sync"
 	"time"
@@ -265,10 +265,9 @@ func main() {
 
 ```
 
-
 ## 3.2 Postgresql
 
-### 3.2.1 快速开始 
+### 3.2.1 快速开始
 
 ```go
 package main
@@ -276,7 +275,7 @@ package main
 import (
 	"context"
 	"fmt"
-	storage_lock "github.com/golang-infrastructure/go-storage-lock"
+	storage_lock "github.com/storage-lock/go-storage-lock"
 	"strings"
 	"sync"
 	"time"
@@ -378,13 +377,14 @@ func main() {
 ```
 
 ### 3.2.2 详细配置
+
 ```go
 package main
 
 import (
 	"context"
 	"fmt"
-	storage_lock "github.com/golang-infrastructure/go-storage-lock"
+	storage_lock "github.com/storage-lock/go-storage-lock"
 	"strings"
 	"sync"
 	"time"
@@ -502,7 +502,6 @@ func main() {
 
 ```
 
-
 ## 3.3 SQLServer
 
 ### 3.3.1 快速开始
@@ -513,7 +512,7 @@ package main
 import (
 	"context"
 	"fmt"
-	storage_lock "github.com/golang-infrastructure/go-storage-lock"
+	storage_lock "github.com/storage-lock/go-storage-lock"
 	"strings"
 	"sync"
 	"time"
@@ -625,7 +624,7 @@ package main
 import (
 	"context"
 	"fmt"
-	storage_lock "github.com/golang-infrastructure/go-storage-lock"
+	storage_lock "github.com/storage-lock/go-storage-lock"
 	"strings"
 	"sync"
 	"time"
@@ -754,7 +753,7 @@ package main
 import (
 	"context"
 	"fmt"
-	storage_lock "github.com/golang-infrastructure/go-storage-lock"
+	storage_lock "github.com/storage-lock/go-storage-lock"
 	"strings"
 	"sync"
 	"time"
@@ -862,7 +861,7 @@ package main
 import (
 	"context"
 	"fmt"
-	storage_lock "github.com/golang-infrastructure/go-storage-lock"
+	storage_lock "github.com/storage-lock/go-storage-lock"
 	"strings"
 	"sync"
 	"time"
@@ -978,11 +977,9 @@ func main() {
 
 ```
 
-
-
 ## 3.5 TIDB
 
-TODO 
+TODO
 
 ## 3.6 MariaDB
 
@@ -994,7 +991,7 @@ package main
 import (
 	"context"
 	"fmt"
-	storage_lock "github.com/golang-infrastructure/go-storage-lock"
+	storage_lock "github.com/storage-lock/go-storage-lock"
 	"strings"
 	"sync"
 	"time"
@@ -1108,7 +1105,7 @@ package main
 import (
 	"context"
 	"fmt"
-	storage_lock "github.com/golang-infrastructure/go-storage-lock"
+	storage_lock "github.com/storage-lock/go-storage-lock"
 	"strings"
 	"sync"
 	"time"
@@ -1226,29 +1223,27 @@ func main() {
 
 # 五、HTTP API
 
-
-
 # 六、Storage Lock分布式锁算法原理详解
 
-TODO 
-
+TODO
 
 # 七、FAQ
 
 ## 6.1 分布式情况下的表现？
 
-
 ## 6.2 数据库主从同步会不会有问题？
+
 我们来假设一个极端情况，数据的读取都是在从库读取的，数据的修改操作都是在主库进行的，因为所有的操作都会带一个乐观锁的版本号，
 所以如果被操作的数据的版本和自己看到的版本不一致的时候则会操作失败。
 
 ## 6.3 锁的超时是如何实现的？锁的竞争者在不同时区时会不会有问题？
+
 通过数据库的时间来协调锁竞争者实现锁超时，并不会使用锁竞争者的本地时间，所以能够保证所有的所竞争者使用的时间都是相同的，所以不会有问题，
 除非数据库实例的时间有问题，比如出现时钟回拨。
 
 # 七、TODO
 
-- 增加分布式锁日志表以备查问题 
+- 增加分布式锁日志表以备查问题
 - 
 
 

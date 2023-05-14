@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"github.com/golang-infrastructure/go-iterator"
 	"time"
 )
 
@@ -11,6 +12,9 @@ type Version uint64
 // Storage 表示一个存储介质的实现，要实现四个增删改查的方法和一个初始化的方法，以及能够提供Storage的日期，
 // 因为在分布式系统中日期很重要，必须保证参与分布式运算的各个节点使用相同的时间
 type Storage interface {
+
+	// GetName Storage的名称，用于区分不同的Storage的实现
+	GetName() string
 
 	// Init 初始化操作，比如创建存储锁的表，需要支持多次调用，每次创建Storage的时候会调用此方法初始化
 	Init(ctx context.Context) error
@@ -36,4 +40,7 @@ type Storage interface {
 
 	// Close 关闭此存储介质
 	Close(ctx context.Context) error
+
+	// List 列出当前所有的锁的信息
+	List(ctx context.Context) (iterator.Iterator[*LockInformation], error)
 }

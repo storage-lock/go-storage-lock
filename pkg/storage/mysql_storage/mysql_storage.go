@@ -5,97 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/golang-infrastructure/go-storage-lock/storage_lock"
-	"sync"
+	"github.com/golang-infrastructure/go-iterator"
+	"github.com/storage-lock/go-storage-lock/pkg/storage"
+	"github.com/storage-lock/go-storage-lock/pkg/storage/base"
+	"github.com/storage-lock/go-storage-lock/pkg/storage_lock"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/golang-infrastructure/go-storage-lock/storage"
 )
-
-// ------------------------------------------------- --------------------------------------------------------------------
-
-const DefaultStorageTableName = "storage_lock"
-
-// MySQLStorageConnectionGetter 创建一个MySQL的连接
-type MySQLStorageConnectionGetter struct {
-
-	// 主机的名字
-	Host string
-
-	// 主机的端口
-	Port uint
-
-	// 用户名
-	User string
-
-	// 密码
-	Passwd string
-
-	DatabaseName string
-
-	// DSN
-	// Example: "root:UeGqAm8CxYGldMDLoNNt@tcp(192.168.128.206:3306)/storage_lock_test"
-	DSN string
-
-	// 初始化好的数据库实例
-	db   *sql.DB
-	err  error
-	once sync.Once
-}
-
-var _ storage.ConnectionGetter[*sql.DB] = &MySQLStorageConnectionGetter{}
-
-// NewMySQLStorageConnectionGetterFromDSN 从DSN创建MySQL连接
-func NewMySQLStorageConnectionGetterFromDSN(dsn string) *MySQLStorageConnectionGetter {
-	return &MySQLStorageConnectionGetter{
-		DSN: dsn,
-	}
-}
-
-// NewMySQLStorageConnectionGetter 从服务器属性创建数据库连接
-func NewMySQLStorageConnectionGetter(host string, port uint, user, passwd, database string) *MySQLStorageConnectionGetter {
-	return &MySQLStorageConnectionGetter{
-		Host:         host,
-		Port:         port,
-		User:         user,
-		Passwd:       passwd,
-		DatabaseName: database,
-	}
-}
-
-// Get 获取到数据库的连接
-func (x *MySQLStorageConnectionGetter) Get(ctx context.Context) (*sql.DB, error) {
-	x.once.Do(func() {
-		db, err := sql.Open("mysql", x.GetDSN())
-		if err != nil {
-			x.err = err
-			return
-		}
-		x.db = db
-	})
-	return x.db, x.err
-}
-
-func (x *MySQLStorageConnectionGetter) GetDSN() string {
-	if x.DSN != "" {
-		return x.DSN
-	}
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s", x.User, x.Passwd, x.Host, x.Port, x.DatabaseName)
-}
-
-// ------------------------------------------------- --------------------------------------------------------------------
-
-type MySQLStorageOptions struct {
-
-	// 存放锁的表的名字
-	TableName string
-
-	// 用于获取数据库连接
-	ConnectionGetter storage.ConnectionGetter[*sql.DB]
-}
-
-// ------------------------------------------------- --------------------------------------------------------------------
 
 type MySQLStorage struct {
 	options *MySQLStorageOptions
@@ -107,20 +24,24 @@ type MySQLStorage struct {
 var _ storage.Storage = &MySQLStorage{}
 
 func NewMySQLStorage(ctx context.Context, options *MySQLStorageOptions) (*MySQLStorage, error) {
-	storage := &MySQLStorage{
+	s := &MySQLStorage{
 		options: options,
 	}
 
-	err := storage.Init(ctx)
+	err := s.Init(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return storage, nil
+	return s, nil
+}
+
+func (x *MySQLStorage) GetName() string {
+	return "mysql-storage"
 }
 
 func (x *MySQLStorage) Init(ctx context.Context) error {
-	db, err := x.options.ConnectionGetter.Get(ctx)
+	db, err := x.options.ConnectionProvider.Get(ctx)
 	if err != nil {
 		return err
 	}
@@ -128,7 +49,7 @@ func (x *MySQLStorage) Init(ctx context.Context) error {
 	// 创建存储锁信息需要的表
 	tableFullName := x.options.TableName
 	if tableFullName == "" {
-		tableFullName = DefaultStorageTableName
+		tableFullName = storage.DefaultStorageTableName
 	}
 	createTableSql := `CREATE TABLE IF NOT EXISTS %s (
     lock_id VARCHAR(255) NOT NULL PRIMARY KEY,
@@ -241,4 +162,12 @@ func (x *MySQLStorage) Close(ctx context.Context) error {
 		return nil
 	}
 	return x.db.Close()
+}
+
+func (x *MySQLStorage) List(ctx context.Context) (iterator.Iterator[*storage.LockInformation], error) {
+	rows, err := x.db.Query("SELECT * FROM %s", x.tableFullName)
+	if err != nil {
+		return nil, err
+	}
+	return base.NewRowsIterator(rows), nil
 }

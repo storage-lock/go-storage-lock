@@ -3,7 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
-	storage_lock "github.com/golang-infrastructure/go-storage-lock"
+	"github.com/storage-lock/go-storage-lock/pkg/storage/sql_server_storage"
+	"github.com/storage-lock/go-storage-lock/pkg/storage_lock"
 	"strings"
 	"sync"
 	"time"
@@ -22,14 +23,14 @@ func main() {
 
 	// 第一步先配置存储介质相关的参数，包括如何连接到这个数据库，连接上去之后锁的信息存储到哪里等等
 	// 配置如何连接到数据库
-	connectionGetter := storage_lock.NewSqlServerStorageConnectionGetterFromDSN(dsn)
-	storageOptions := &storage_lock.SqlServerStorageOptions{
+	connectionGetter := sql_server_storage.NewSqlServerStorageConnectionGetterFromDSN(dsn)
+	storageOptions := &sql_server_storage.SqlServerStorageOptions{
 		// 数据库连接获取方式，可以使用内置的从DSN获取连接，也可以自己实现接口决定如何连接
-		ConnectionGetter: connectionGetter,
+		ConnectionProvider: connectionGetter,
 		// 锁的信息是存储在哪张表中的，不设置的话默认为storage_lock
 		TableName: "storage_lock_table",
 	}
-	storage, err := storage_lock.NewSqlServerStorage(context.Background(), storageOptions)
+	storage, err := sql_server_storage.NewSqlServerStorage(context.Background(), storageOptions)
 	if err != nil {
 		fmt.Println("Create Storage Failed： " + err.Error())
 		return

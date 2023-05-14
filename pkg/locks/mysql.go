@@ -1,26 +1,21 @@
-package lock
+package locks
 
 import (
 	"context"
-	"github.com/golang-infrastructure/go-storage-lock/pkg/storage/mysql_storage"
-	"github.com/golang-infrastructure/go-storage-lock/pkg/storage_lock"
-)
-
-// ------------------------------------------------- --------------------------------------------------------------------
-
-const (
-	DefaultStorageTableName = "storage_lock"
+	"github.com/storage-lock/go-storage-lock/pkg/storage"
+	"github.com/storage-lock/go-storage-lock/pkg/storage/mysql_storage"
+	"github.com/storage-lock/go-storage-lock/pkg/storage_lock"
 )
 
 // NewMySQLStorageLock 高层API，使用默认配置快速创建基于MySQL的分布式锁
 func NewMySQLStorageLock(ctx context.Context, lockId string, dsn string) (*storage_lock.StorageLock, error) {
-	connectionGetter := mysql_storage.NewMySQLStorageConnectionGetterFromDSN(dsn)
+	connectionProvider := mysql_storage.NewMySQLConnectionProviderFromDSN(dsn)
 	storageOptions := &mysql_storage.MySQLStorageOptions{
-		ConnectionGetter: connectionGetter,
-		TableName:        DefaultStorageTableName,
+		ConnectionProvider: connectionProvider,
+		TableName:          storage.DefaultStorageTableName,
 	}
 
-	storage, err := mysql_storage.NewMySQLStorage(ctx, storageOptions)
+	s, err := mysql_storage.NewMySQLStorage(ctx, storageOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +26,7 @@ func NewMySQLStorageLock(ctx context.Context, lockId string, dsn string) (*stora
 		LeaseRefreshInterval:  storage_lock.DefaultLeaseRefreshInterval,
 		VersionMissRetryTimes: storage_lock.DefaultVersionMissRetryTimes,
 	}
-	return storage_lock.NewStorageLock(storage, lockOptions), nil
+	return storage_lock.NewStorageLock(s, lockOptions), nil
 }
 
 // ------------------------------------------------ ---------------------------------------------------------------------
