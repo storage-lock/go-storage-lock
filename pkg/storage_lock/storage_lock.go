@@ -180,6 +180,7 @@ func (x *StorageLock) lockNotExists(ctx context.Context, leftTryTimes uint, owne
 
 	// 锁还不存在，那尝试持有它
 	lockInformation = &storage.LockInformation{
+		LockId:  x.options.LockId,
 		OwnerId: ownerId,
 		// 锁的开始时间跟Storage的时间保持一致，这样才好有对比
 		LockBeginTime:   storageTime,

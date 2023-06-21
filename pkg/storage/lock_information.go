@@ -8,6 +8,9 @@ import (
 // LockInformation 锁的相关信息，是要持久化保存到相关介质中的
 type LockInformation struct {
 
+	// 锁的ID
+	LockId string `json:"lock_id"`
+
 	// 当前时谁在持有这个锁，是一个全局唯一的ID
 	OwnerId string `json:"owner_id"`
 
