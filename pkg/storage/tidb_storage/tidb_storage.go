@@ -12,6 +12,8 @@ import (
 
 // TidbStorage 把锁存储在Tidb数据库中
 type TidbStorage struct {
+
+	// 其实底层实现跟MySQL是一样一样的
 	*mysql_storage.MySQLStorage
 
 	options *TidbStorageOptions

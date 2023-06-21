@@ -11,12 +11,19 @@ import (
 	"time"
 )
 
+// 这个文件中的方法是用来方便的测试Storage的实现
+
 const (
-	testStorageLockId  = "storage_lock_lock_id_test"
+
+	// 测试时锁定的资源ID
+	testStorageLockId = "storage_lock_lock_id_test"
+
+	// 测试时锁的初始版本号
 	testStorageVersion = 1
 )
 
 // 创建一个单元测试中使用的锁的信息
+// 参数是一个可选的
 func getTestLockInformation(t *testing.T, version ...storage.Version) *storage.LockInformation {
 	if len(version) == 0 {
 		version = append(version, testStorageVersion)

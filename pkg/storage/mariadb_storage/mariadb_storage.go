@@ -10,7 +10,10 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
+// MariaDbStorage 基于MariaDb作为Storage
 type MariaDbStorage struct {
+
+	// 其实内部就是跟MySQL的实现是一样一样的
 	*mysql_storage.MySQLStorage
 
 	options *MariaStorageOptions
@@ -18,6 +21,7 @@ type MariaDbStorage struct {
 
 var _ storage.Storage = &MariaDbStorage{}
 
+// NewMariaDbStorage 创建基于MariaDb的Storage
 func NewMariaDbStorage(ctx context.Context, options *MariaStorageOptions) (*MariaDbStorage, error) {
 
 	mysqlStorage, err := mysql_storage.NewMySQLStorage(ctx, options.MySQLStorageOptions)

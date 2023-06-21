@@ -7,16 +7,16 @@ import (
 	"time"
 )
 
-// LeaseRefreshGoroutine 用于在锁存在期间为锁的租约续期的协程
+// LeaseRefreshGoroutine 用于在锁存在期间为锁的租约续期的协程，当前实现是每个锁在持有期间都会配备一个刷新锁的租约时间的协程
 type LeaseRefreshGoroutine struct {
 
-	// 运行标志位
+	// 协程是否处在运行状态的标志位，为true表示处在运行状态，为false表示未处在运行状态
 	isRunning atomic.Bool
 
-	// 要续哪个锁的租约
+	// 要续哪个锁的租约，当前每个续租的协程只能为一个锁续约，并且每次重新获取锁都会启动一个新的续租协程
 	storageLock *StorageLock
 
-	// 是为谁而续这个租约
+	// 是为谁而续这个租约，即锁的持有者
 	ownerId string
 }
 
@@ -55,12 +55,14 @@ func (x *LeaseRefreshGoroutine) Start() {
 			} else {
 				continueErrorCount = 0
 			}
+
 			// 休眠，避免刷新得太频繁导致乐观锁的版本miss率过高
 			time.Sleep(x.storageLock.options.LeaseRefreshInterval)
 		}
 	}()
 }
 
+// Stop 停止续租协程
 func (x *LeaseRefreshGoroutine) Stop() {
 	x.isRunning.Store(false)
 }
@@ -69,13 +71,13 @@ func (x *LeaseRefreshGoroutine) Stop() {
 func (x *LeaseRefreshGoroutine) refreshLeaseExpiredTime(ctx context.Context) error {
 	information, err := x.storageLock.getLockInformation(ctx)
 	if err != nil {
-		// 锁已经不存在了，则直接退出
+		// 如果是锁已经不存在了，则先将续租协程停掉，以免在短时间内进行大量获取释放操作时挤压了太多无用的续租协程过慢的退出
 		if errors.Is(err, ErrLockNotFound) {
 			x.Stop()
 		}
 		return err
 	}
-	// 锁已经不是自己持有了，则直接退出
+	// 锁已经不是自己持有了，则直接退出，每个续租协程都是很忠贞的只为一个owner续租
 	if information.OwnerId != x.ownerId {
 		x.Stop()
 		return ErrLockNotBelongYou

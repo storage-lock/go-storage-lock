@@ -2,17 +2,17 @@ package storage_lock
 
 import "time"
 
-// ------------------------------------------------- --------------------------------------------------------------------
-
 const (
 
 	// DefaultLeaseExpireAfter 默认的租约有效时间
+	// 这个时间不适合设置太长，如果太长的话可能会导致上次持有锁的owner异常退出时锁不能及时得到释放
+	// 这个值也不适合设置太短，太短的话可能会导致锁来不及续租就过期了从而导致一个锁同时被多个人同时获取
 	DefaultLeaseExpireAfter = time.Minute * 5
 
 	// DefaultLeaseRefreshInterval 默认的租约过期时间刷新间隔
 	DefaultLeaseRefreshInterval = time.Second * 10
 
-	// DefaultVersionMissRetryTimes 默认的乐观锁未命中时的重试次数
+	// DefaultVersionMissRetryTimes 默认的版本乐观锁未命中时的重试次数
 	DefaultVersionMissRetryTimes = 100
 )
 
@@ -30,16 +30,18 @@ type StorageLockOptions struct {
 	// 租约刷新间隔，当获取锁成功时会有一个协程专门负责续约租约，这个参数就决定它每隔多久发起一次续约操作，这个用来保证不会在锁使用的期间突然过期
 	LeaseRefreshInterval time.Duration
 
-	// 乐观锁的版本未命中的时候的重试次数
-	VersionMissRetryTimes uint
+	// 2023-6-21 21:28:05 修改为版本未命中的时候就锁死一直等待，而不设置具体的放弃时间
+	// 这个放弃时机感觉以具体的时间长度更为合适
+	//// 乐观锁的版本未命中的时候的重试次数
+	//VersionMissRetryTimes uint
 }
 
 // NewStorageLockOptions 使用默认值创建配置项
 func NewStorageLockOptions() *StorageLockOptions {
 	return &StorageLockOptions{
-		LeaseExpireAfter:      DefaultLeaseExpireAfter,
-		LeaseRefreshInterval:  DefaultLeaseRefreshInterval,
-		VersionMissRetryTimes: DefaultVersionMissRetryTimes,
+		LeaseExpireAfter:     DefaultLeaseExpireAfter,
+		LeaseRefreshInterval: DefaultLeaseRefreshInterval,
+		//VersionMissRetryTimes: DefaultVersionMissRetryTimes,
 	}
 }
 
@@ -63,15 +65,7 @@ func (x *StorageLockOptions) WithLeaseRefreshInterval(leaseRefreshInterval time.
 	return x
 }
 
-func (x *StorageLockOptions) WithVersionMissRetryTimes(versionMissRetryTimes uint) *StorageLockOptions {
-	x.VersionMissRetryTimes = versionMissRetryTimes
-	return x
-}
-
-//// 返回下一个租约过期时间在哪一时刻
-//func (x *StorageLockOptions) nextLeaseExpireTime(ctx context.Context, storage Storage) time.Time {
-//	storage.GetTime(ctx)
-//	return time.Now().Add(x.LeaseExpireAfter)
+//func (x *StorageLockOptions) WithVersionMissRetryTimes(versionMissRetryTimes uint) *StorageLockOptions {
+//	x.VersionMissRetryTimes = versionMissRetryTimes
+//	return x
 //}
-
-// ------------------------------------------------ ---------------------------------------------------------------------
