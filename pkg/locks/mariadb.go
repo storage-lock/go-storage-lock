@@ -19,10 +19,10 @@ func NewMariaDBStorageLock(ctx context.Context, lockId string, dsn string) (*sto
 	}
 
 	lockOptions := &storage_lock.StorageLockOptions{
-		LockId:                lockId,
-		LeaseExpireAfter:      storage_lock.DefaultLeaseExpireAfter,
-		LeaseRefreshInterval:  storage_lock.DefaultLeaseRefreshInterval,
-		VersionMissRetryTimes: storage_lock.DefaultVersionMissRetryTimes,
+		LockId:               lockId,
+		LeaseExpireAfter:     storage_lock.DefaultLeaseExpireAfter,
+		LeaseRefreshInterval: storage_lock.DefaultLeaseRefreshInterval,
+		//VersionMissRetryTimes: storage_lock.DefaultVersionMissRetryTimes,
 	}
 	return storage_lock.NewStorageLock(storage, lockOptions), nil
 }

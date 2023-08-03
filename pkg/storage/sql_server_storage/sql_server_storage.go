@@ -186,5 +186,5 @@ func (x *SqlServerStorage) List(ctx context.Context) (iterator.Iterator[*storage
 	if err != nil {
 		return nil, err
 	}
-	return base.NewRowsIterator(rows), nil
+	return storage_base.NewRowsIterator(rows), nil
 }

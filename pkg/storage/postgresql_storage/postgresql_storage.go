@@ -184,5 +184,5 @@ func (x *PostgreSQLStorage) List(ctx context.Context) (iterator.Iterator[*storag
 	if err != nil {
 		return nil, err
 	}
-	return base.NewRowsIterator(rows), nil
+	return storage_base.NewRowsIterator(rows), nil
 }

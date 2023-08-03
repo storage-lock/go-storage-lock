@@ -31,3 +31,8 @@ var (
 	// ErrOwnerCanOnlyOne 锁的有拥有者只能有一个，这是尝试给锁指定了多个owner时会返回的错误
 	ErrOwnerCanOnlyOne = errors.New("lock owner only one")
 )
+
+var (
+	// ErrTimeProviderUnavailable TimeProvider无法提供时间
+	ErrTimeProviderUnavailable = errors.New("time provider unavailable")
+)

@@ -54,20 +54,29 @@ func NewStorageLock(storage storage.Storage, options ...*StorageLockOptions) *St
 }
 
 // Lock 尝试获取锁
+// ctx: 用来控制超时，如果想永远不超时则传入context.Background，此时不获取到锁永不罢休，返回也永远为nil
 // ownerId: 是谁在尝试获取锁，如果不指定的话会为当前协程生成一个默认的ownerId
 func (x *StorageLock) Lock(ctx context.Context, ownerId ...string) error {
 	for {
-		err := x.lockWithRetry(ctx, DefaultVersionMissRetryTimes, ownerId...)
+
+		err := x.lockWithRetry(ctx, ownerId...)
 		if err == nil {
 			return nil
 		}
 		// TODO 2023-6-21 00:33:21 错误处理
-		time.Sleep(time.Second * time.Duration(rand.Intn(5)+1))
+
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(time.Microsecond):
+			time.Sleep(time.Second * time.Duration(rand.Intn(5)+1))
+			continue
+		}
 	}
 }
 
 // lockWithRetry 带重试次数的获取锁，因为乐观锁的失败率可能会比较高
-func (x *StorageLock) lockWithRetry(ctx context.Context, leftTryTimes uint, ownerId ...string) error {
+func (x *StorageLock) lockWithRetry(ctx context.Context, ownerId ...string) error {
 
 	// 如果没有指定ownerId，则为其生成一个默认的ownerId
 	if len(ownerId) == 0 {
@@ -85,25 +94,25 @@ func (x *StorageLock) lockWithRetry(ctx context.Context, leftTryTimes uint, owne
 
 	// 如果锁的信息存在，则说明之前锁就已经存在了
 	if lockInformation != nil {
-		return x.lockExists(ctx, leftTryTimes, ownerId[0], lockInformation)
+		return x.lockExists(ctx, ownerId[0], lockInformation)
 	} else {
 		// 否则认为之前锁是不存在的
-		return x.lockNotExists(ctx, leftTryTimes, ownerId[0], lockInformation)
+		return x.lockNotExists(ctx, ownerId[0], lockInformation)
 	}
 }
 
 // 尝试获取已经存在的锁
-func (x *StorageLock) lockExists(ctx context.Context, leftTryTimes uint, ownerId string, lockInformation *storage.LockInformation) error {
+func (x *StorageLock) lockExists(ctx context.Context, ownerId string, lockInformation *storage.LockInformation) error {
 	// 给定的锁已经存在了，又分为两种情况，一种是锁就是自己持有的，一种是锁被别人持有
 	if lockInformation.OwnerId == ownerId {
-		return x.reentryLock(ctx, leftTryTimes, ownerId, lockInformation)
+		return x.reentryLock(ctx, ownerId, lockInformation)
 	} else {
-		return x.cleanExpiredLockAndRetry(ctx, leftTryTimes, ownerId, lockInformation)
+		return x.cleanExpiredLockAndRetry(ctx, ownerId, lockInformation)
 	}
 }
 
 // 进入重入锁的逻辑，尝试对可重入锁的层级加一
-func (x *StorageLock) reentryLock(ctx context.Context, leftTryTimes uint, ownerId string, lockInformation *storage.LockInformation) error {
+func (x *StorageLock) reentryLock(ctx context.Context, ownerId string, lockInformation *storage.LockInformation) error {
 
 	// 计算从当前时间开始计算的租约的过期时间
 	expireTime, err := x.getLeaseExpireTime(ctx)
@@ -131,16 +140,18 @@ func (x *StorageLock) reentryLock(ctx context.Context, leftTryTimes uint, ownerI
 		return err
 	}
 	// 执行到这里，如果没更新成功，并且还有重试次数的话则重试
-	if leftTryTimes > 0 {
-		return x.lockWithRetry(ctx, leftTryTimes-1, ownerId)
-	} else {
-		// 当前没有重试次数了，则返回错误
+	select {
+	case <-time.After(time.Microsecond):
+		// 还有时间，再重试一次
+		return x.lockWithRetry(ctx, ownerId)
+	case <-ctx.Done():
+		// 超时不再重试
 		return err
 	}
 }
 
 // 获取锁的时候发现锁是被别人持有者的，但是不确定是不是有效的持有，于是就先尝试清除无效的持有，然后再重新竞争锁
-func (x *StorageLock) cleanExpiredLockAndRetry(ctx context.Context, leftTryTimes uint, ownerId string, lockInformation *storage.LockInformation) error {
+func (x *StorageLock) cleanExpiredLockAndRetry(ctx context.Context, ownerId string, lockInformation *storage.LockInformation) error {
 
 	// 另一种锁已经存在的情况是锁被别人持有者，这个时候又分为两种情况
 	// 一种是持有锁的人在租约期内，那这个时候只能老老实实的等待
@@ -164,11 +175,11 @@ func (x *StorageLock) cleanExpiredLockAndRetry(ctx context.Context, leftTryTimes
 
 	// 然后再尝试重新竞争锁，回归到一个普通的不存在的锁的竞争流程
 	// 当然在分布式高竞争的情况下更有可能清除过期的锁是为他人做嫁衣，A刚删除锁还没来得及重新竞争就被B获取到了，A白忙活一场哈哈哈
-	return x.lockWithRetry(ctx, leftTryTimes-1, ownerId)
+	return x.lockWithRetry(ctx, ownerId)
 }
 
 // 尝试获取不存在的锁，这个是最爽的分支，能够直接获取到锁
-func (x *StorageLock) lockNotExists(ctx context.Context, leftTryTimes uint, ownerId string, lockInformation *storage.LockInformation) error {
+func (x *StorageLock) lockNotExists(ctx context.Context, ownerId string, lockInformation *storage.LockInformation) error {
 
 	// 获取Storage的时间
 	storageTime, err := x.storage.GetTime(ctx)
@@ -190,10 +201,11 @@ func (x *StorageLock) lockNotExists(ctx context.Context, leftTryTimes uint, owne
 	}
 	err = x.storage.InsertWithVersion(ctx, x.options.LockId, lockInformation.Version, lockInformation)
 	if err != nil {
-		if leftTryTimes > 0 {
-			return x.lockWithRetry(ctx, leftTryTimes-1, ownerId)
-		} else {
+		select {
+		case <-ctx.Done():
 			return ErrLockFailed
+		case <-time.After(time.Microsecond):
+			return x.lockWithRetry(ctx, ownerId)
 		}
 	}
 
@@ -225,17 +237,25 @@ func (x *StorageLock) getLeaseExpireTime(ctx context.Context) (time.Time, error)
 // ownerId: 是谁在尝试释放锁，如果不指定的话会为当前协程生成一个默认的ownerId
 func (x *StorageLock) UnLock(ctx context.Context, ownerId ...string) error {
 	for {
-		err := x.unLockWithRetry(ctx, DefaultVersionMissRetryTimes, ownerId...)
+
+		err := x.unlockWithRetry(ctx, ownerId...)
 		if err == nil {
 			return nil
 		}
 		// TODO 2023-6-21 00:33:21 错误处理
-		time.Sleep(time.Second * time.Duration(rand.Intn(5)+1))
+
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(time.Microsecond):
+			time.Sleep(time.Second * time.Duration(rand.Intn(5)+1))
+			continue
+		}
 	}
 }
 
-// unLockWithRetry 手动指定重试次数的释放锁，如果锁竞争较大的话应该适当提高乐观锁的失败重试次数
-func (x *StorageLock) unLockWithRetry(ctx context.Context, leftTryTimes uint, ownerId ...string) error {
+// unlockWithRetry 手动指定重试次数的释放锁，如果锁竞争较大的话应该适当提高乐观锁的失败重试次数
+func (x *StorageLock) unlockWithRetry(ctx context.Context, ownerId ...string) error {
 
 	// 如果没有指定ownerId的话，则为其生成一个默认的ownerId
 	if len(ownerId) == 0 {
@@ -269,15 +289,15 @@ func (x *StorageLock) unLockWithRetry(ctx context.Context, leftTryTimes uint, ow
 
 	// 如果释放一次之后发现还没有释放干净，说明是重入锁，并且加锁次数还没有为0，则尝试更新锁的信息
 	if lockInformation.LockCount > 0 {
-		return x.reentryUnlock(ctx, leftTryTimes, ownerId[0], lockInformation, lastVersion)
+		return x.reentryUnlock(ctx, ownerId[0], lockInformation, lastVersion)
 	} else {
 		// 如果经过这次操作之后锁的锁的锁定次数为0，说明应该彻底释放掉这个锁了，将其从Storage中清除
-		return x.unlockWithClean(ctx, leftTryTimes, ownerId[0], lockInformation, lastVersion)
+		return x.unlockWithClean(ctx, ownerId[0], lockInformation, lastVersion)
 	}
 }
 
 // 可重入锁的层级减一，但是并没有彻底释放，更新数据库中的锁的信息
-func (x *StorageLock) reentryUnlock(ctx context.Context, leftTryTimes uint, ownerId string, lockInformation *storage.LockInformation, lastVersion storage.Version) error {
+func (x *StorageLock) reentryUnlock(ctx context.Context, ownerId string, lockInformation *storage.LockInformation, lastVersion storage.Version) error {
 
 	// 更新锁的过期时间
 	expireTime, err := x.getLeaseExpireTime(ctx)
@@ -297,28 +317,30 @@ func (x *StorageLock) reentryUnlock(ctx context.Context, leftTryTimes uint, owne
 		return err
 	}
 	// 更新未成功，看下是否还有重试次数
-	if leftTryTimes > 0 {
-		// 我还有重试次数，我要尝试重试
-		return x.unLockWithRetry(ctx, leftTryTimes-1, ownerId)
-	} else {
+	select {
+	case <-ctx.Done():
 		// 更新失败，并且也没有重试次数了，则只好返回错误
 		return ErrUnlockFailed
+	case <-time.After(time.Microsecond):
+		// 我还有重试次数，我要尝试重试
+		return x.unlockWithRetry(ctx, ownerId)
 	}
 }
 
 // 锁被彻底释放干净了，需要将其从Storage中清除
-func (x *StorageLock) unlockWithClean(ctx context.Context, leftTryTimes uint, ownerId string, lockInformation *storage.LockInformation, lastVersion storage.Version) error {
+func (x *StorageLock) unlockWithClean(ctx context.Context, ownerId string, lockInformation *storage.LockInformation, lastVersion storage.Version) error {
 	// 重入锁的次数已经被释放干净了，现在需要将其彻底删除
 	err := x.storage.DeleteWithVersion(ctx, x.options.LockId, lastVersion, lockInformation)
 	// 如果删除的时候遇到错误，则直接认为锁释放失败
 	if err != nil {
 		if errors.Is(err, ErrVersionMiss) {
 			// 还有重试次数，则再次尝试删除锁
-			if leftTryTimes > 0 {
-				return x.unLockWithRetry(ctx, leftTryTimes-1, ownerId)
-			} else {
+			select {
+			case <-ctx.Done():
 				// 没有重试次数了，则只好返回错误
 				return ErrLockFailed
+			case <-time.After(time.Microsecond):
+				return x.unlockWithRetry(ctx, ownerId)
 			}
 		} else {
 			return err

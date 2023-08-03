@@ -29,7 +29,7 @@ func NewTidbStorageLock(ctx context.Context, lockId string, dsn string) (*storag
 		LockId:                lockId,
 		LeaseExpireAfter:      storage_lock.DefaultLeaseExpireAfter,
 		LeaseRefreshInterval:  storage_lock.DefaultLeaseRefreshInterval,
-		VersionMissRetryTimes: storage_lock.DefaultVersionMissRetryTimes,
+		//VersionMissRetryTimes: storage_lock.DefaultVersionMissRetryTimes,
 	}
 	return storage_lock.NewStorageLock(s, lockOptions), nil
 }

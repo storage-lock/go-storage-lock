@@ -169,5 +169,5 @@ func (x *MySQLStorage) List(ctx context.Context) (iterator.Iterator[*storage.Loc
 	if err != nil {
 		return nil, err
 	}
-	return base.NewRowsIterator(rows), nil
+	return storage_base.NewRowsIterator(rows), nil
 }
