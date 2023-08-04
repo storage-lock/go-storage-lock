@@ -33,8 +33,12 @@ github.com/rogpeppe/go-internal v1.10.0 h1:TMyTOH3F/DB16zRVcYyreMH6GnZZrwQVAoYjR
 github.com/rogpeppe/go-internal v1.10.0/go.mod h1:UQnix2H7Ngw/k4C5ijL5+65zddjncjaFoBhdsK/akog=
 github.com/storage-lock/go-events v0.0.0-20230804160245-1ee3734433ff h1:0jmHBo49cWuhOwF8+Tq5Bpgtj4Ry5Rzu0eBQifDtO/g=
 github.com/storage-lock/go-events v0.0.0-20230804160245-1ee3734433ff/go.mod h1:0pMZlxz3zT5waaa3ezbj3ABOlccdZYRzxf+VmLuaduM=
+github.com/storage-lock/go-events v0.0.0-20230804173546-17670612bf01 h1:+Eiuss9AZD6KXUSYtXR3CYpQ7cIPa7QMtAwrobYNXAI=
+github.com/storage-lock/go-events v0.0.0-20230804173546-17670612bf01/go.mod h1:LGZzW3f+td+b+i1pphoI9Dge0kDsguFza/YkXLADet0=
 github.com/storage-lock/go-storage v0.0.0-20230804160614-b1e0d2815105 h1:VtqaEZTk++qjVlGKp6NJ4rbksMb+0lL6d5zyq8SbPPk=
 github.com/storage-lock/go-storage v0.0.0-20230804160614-b1e0d2815105/go.mod h1:rsdEP+Qq+lvkTp6UbXljkznIV09Gh3wWuMjiDSXPgww=
+github.com/storage-lock/go-storage v0.0.0-20230804173446-351fafb1a6ff h1:mb92Dx5lJSTla909XfDASosazgH1XDa2GZ0gFkyejZU=
+github.com/storage-lock/go-storage v0.0.0-20230804173446-351fafb1a6ff/go.mod h1:M7VF0+2ZZ2zqiur8jHXbDELgtrXhXtfvNRFAXEwdayg=
 github.com/storage-lock/go-utils v0.0.0-20230804131655-6dbe431cdc1a h1:6nSZOPYmogTELlp3ZUmzTbOupdrH7OomezDMKHnSAzA=
 github.com/storage-lock/go-utils v0.0.0-20230804131655-6dbe431cdc1a/go.mod h1:V0M52rFAkNt77MA3odRqwkl1xRkswsEcX/neFbgmhZY=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
