@@ -121,7 +121,7 @@ func (x *LeaseRefreshGoroutine) refreshLeaseExpiredTime(ctx context.Context) err
 
 	// 锁已经不是自己持有了，则直接退出，每个续租协程都是很忠贞的只为一个owner续租
 	if information.OwnerId != x.ownerId {
-		e.AddAction(events.NewAction(ActionNotLockOwner).SetPayload(information.ToJsonString()))
+		e.AddAction(events.NewAction(ActionNotLockOwner).AddPayload("lockInformation", information))
 		x.Stop()
 		e.AddActionByName(ActionWatchDogStop).Publish(ctx)
 		return ErrLockNotBelongYou

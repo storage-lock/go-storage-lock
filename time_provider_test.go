@@ -10,7 +10,7 @@ import (
 
 func TestNTPTimeProvider_GetTime(t *testing.T) {
 
-	e := events.NewEvent("xxx").AddListeners(events.NewListenerWrapper(func(ctx context.Context, e *events.Event) {
+	e := events.NewEvent("xxx").AddListeners(events.NewListenerWrapper("test-listener", func(ctx context.Context, e *events.Event) {
 		fmt.Println(e.ToJsonString())
 	}))
 
