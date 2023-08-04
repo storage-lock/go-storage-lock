@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/beevik/ntp v1.1.1
-	github.com/golang-infrastructure/go-goroutine-id v0.0.0-20230106175145-109121461a62
+	github.com/golang-infrastructure/go-goroutine-id v0.0.0-20230331174358-98b48a64077b
 	github.com/golang-infrastructure/go-variable-parameter v0.0.3
 	github.com/google/uuid v1.3.0
 	github.com/storage-lock/go-events v0.0.0-20230804160245-1ee3734433ff
