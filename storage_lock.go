@@ -1,4 +1,4 @@
-package go_storage_lock
+package storage_lock
 
 import (
 	"context"

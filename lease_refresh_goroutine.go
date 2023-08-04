@@ -1,4 +1,4 @@
-package go_storage_lock
+package storage_lock
 
 import (
 	"context"
@@ -138,7 +138,7 @@ func (x *LeaseRefreshGoroutine) refreshLeaseExpiredTime(ctx context.Context) err
 
 	information.LeaseExpireTime = expireTime
 
-	updateAction := events.NewAction(events.ActionStorageUpdateWithVersion)
+	updateAction := events.NewAction(ActionStorageUpdateWithVersion)
 	err = x.storageLock.storage.UpdateWithVersion(ctx, x.storageLock.options.LockId, lastVersion, information.Version, information)
 	e.Fork().AppendAction(updateAction.End().SetErr(err)).SetLockInformation(information).Publish(ctx)
 

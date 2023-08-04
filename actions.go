@@ -1,4 +1,4 @@
-package go_storage_lock
+package storage_lock
 
 // 用于统计Storage上的方法调用行为
 const (
