@@ -1,5 +1,0 @@
-package locks
-
-func createStorageBySqlDB() {
-
-}
