@@ -14,5 +14,5 @@ package cassandra_storage
 //	TableName string
 //
 //	// 提供数据库连接的接口
-//	ConnectionProvider storage.ConnectionProvider[*sql.DB]
+//	ConnectionManager storage.ConnectionManager[*sql.DB]
 //}

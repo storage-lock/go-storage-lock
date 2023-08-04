@@ -11,8 +11,8 @@ import (
 func NewPostgreSQLStorageLock(ctx context.Context, lockId string, dsn string, schema ...string) (*storage_lock.StorageLock, error) {
 	connectionGetter := postgresql_storage.NewPostgreSQLConnectionGetterFromDSN(dsn)
 	storageOptions := &postgresql_storage.PostgreSQLStorageOptions{
-		ConnectionProvider: connectionGetter,
-		TableName:          storage2.DefaultStorageTableName,
+		ConnectionManager: connectionGetter,
+		TableName:         storage2.DefaultStorageTableName,
 	}
 
 	if len(schema) != 0 {

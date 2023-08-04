@@ -52,7 +52,7 @@ func (x *MongoStorage) Init(ctx context.Context) error {
 		return err
 	}
 
-	client, err := x.options.ConnectionProvider.Get(ctx)
+	client, err := x.options.ConnectionProvider.Take(ctx)
 	if err != nil {
 		return err
 	}

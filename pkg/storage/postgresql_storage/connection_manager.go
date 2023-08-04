@@ -4,13 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/storage-lock/go-storage-lock/pkg/storage"
+	"github.com/storage-lock/go-storage-lock/pkg/storage/connection_manager"
 	"sync"
 )
 
 const DefaultPostgreSQLStorageSchema = "public"
 
-type PostgreSQLConnectionProvider struct {
+type PostgreSQLConnectionManager struct {
 
 	// 主机的名字
 	Host string
@@ -36,18 +36,18 @@ type PostgreSQLConnectionProvider struct {
 	once sync.Once
 }
 
-var _ storage.ConnectionProvider[*sql.DB] = &PostgreSQLConnectionProvider{}
+var _ connection_manager.ConnectionManager[*sql.DB] = &PostgreSQLConnectionManager{}
 
 // NewPostgreSQLConnectionGetterFromDSN 从DSN创建MySQL连接
-func NewPostgreSQLConnectionGetterFromDSN(dsn string) *PostgreSQLConnectionProvider {
-	return &PostgreSQLConnectionProvider{
+func NewPostgreSQLConnectionGetterFromDSN(dsn string) *PostgreSQLConnectionManager {
+	return &PostgreSQLConnectionManager{
 		DSN: dsn,
 	}
 }
 
 // NewPostgreSQLConnectionGetter 从服务器属性创建数据库连接
-func NewPostgreSQLConnectionGetter(host string, port uint, user, passwd, databaseName string) *PostgreSQLConnectionProvider {
-	return &PostgreSQLConnectionProvider{
+func NewPostgreSQLConnectionGetter(host string, port uint, user, passwd, databaseName string) *PostgreSQLConnectionManager {
+	return &PostgreSQLConnectionManager{
 		Host:         host,
 		Port:         port,
 		User:         user,
@@ -56,12 +56,12 @@ func NewPostgreSQLConnectionGetter(host string, port uint, user, passwd, databas
 	}
 }
 
-func (x *PostgreSQLConnectionProvider) Name() string {
+func (x *PostgreSQLConnectionManager) Name() string {
 	return "postgresql-connection-provider"
 }
 
 // Get 获取到数据库的连接
-func (x *PostgreSQLConnectionProvider) Get(ctx context.Context) (*sql.DB, error) {
+func (x *PostgreSQLConnectionManager) Get(ctx context.Context) (*sql.DB, error) {
 	x.once.Do(func() {
 		db, err := sql.Open("postgres", x.GetDSN())
 		if err != nil {
@@ -73,10 +73,9 @@ func (x *PostgreSQLConnectionProvider) Get(ctx context.Context) (*sql.DB, error)
 	return x.db, x.err
 }
 
-func (x *PostgreSQLConnectionProvider) GetDSN() string {
+func (x *PostgreSQLConnectionManager) GetDSN() string {
 	if x.DSN != "" {
 		return x.DSN
 	}
 	return fmt.Sprintf("host=%s user=%s password=%s port=%d dbname=%s sslmode=disable", x.Host, x.User, x.Passwd, x.Port, x.DatabaseName)
 }
-

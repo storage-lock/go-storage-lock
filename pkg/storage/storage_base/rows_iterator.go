@@ -6,28 +6,29 @@ import (
 	"github.com/storage-lock/go-storage-lock/pkg/storage"
 )
 
-type RowsIterator struct {
+// SqlRowsIterator 用来把sql.Row包装为一个迭代器
+type SqlRowsIterator struct {
 	rows *sql.Rows
 }
 
-var _ iterator.Iterator[*storage.LockInformation] = &RowsIterator{}
+var _ iterator.Iterator[*storage.LockInformation] = &SqlRowsIterator{}
 
-func NewRowsIterator(rows *sql.Rows) *RowsIterator {
-	return &RowsIterator{
+func NewSqlRowsIterator(rows *sql.Rows) *SqlRowsIterator {
+	return &SqlRowsIterator{
 		rows: rows,
 	}
 }
 
-func (x *RowsIterator) Next() bool {
+func (x *SqlRowsIterator) Next() bool {
 	hasNext := x.rows.Next()
 	if !hasNext {
-		// 当遍历完的时候把Rows给关闭掉，防止链接泄露
+		// 当遍历完的时候把Rows给关闭掉，防止连接泄露
 		_ = x.rows.Close()
 	}
 	return hasNext
 }
 
-func (x *RowsIterator) Value() *storage.LockInformation {
+func (x *SqlRowsIterator) Value() *storage.LockInformation {
 	r := &storage.LockInformation{}
 	_ = x.rows.Scan(&r)
 	return r

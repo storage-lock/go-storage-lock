@@ -12,7 +12,7 @@ func TestNewMongoStorage(t *testing.T) {
 	envName := "STORAGE_LOCK_MONGO_URI"
 	uri := os.Getenv(envName)
 	assert.NotEmpty(t, uri)
-	connectionGetter := NewMongoConnectionProvider(uri)
+	connectionGetter := NewMongoConnectionManager(uri)
 	s, err := NewMongoStorage(context.Background(), &MongoStorageOptions{
 		ConnectionProvider: connectionGetter,
 		DatabaseName:       test_helper.TestDatabaseName,

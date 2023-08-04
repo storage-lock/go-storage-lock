@@ -1,6 +1,9 @@
 package storage_lock
 
-import "time"
+import (
+	"github.com/storage-lock/go-storage-lock/pkg/event"
+	"time"
+)
 
 const (
 
@@ -34,6 +37,9 @@ type StorageLockOptions struct {
 	// 这个放弃时机感觉以具体的时间长度更为合适
 	//// 乐观锁的版本未命中的时候的重试次数
 	//VersionMissRetryTimes uint
+
+	// 用于监听观测锁使用过程中的各种事件
+	EventListeners []event.EventListener
 }
 
 // NewStorageLockOptions 使用默认值创建配置项

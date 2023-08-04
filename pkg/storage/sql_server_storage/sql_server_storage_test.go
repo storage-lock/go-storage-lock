@@ -14,8 +14,8 @@ func TestNewSqlServerStorage(t *testing.T) {
 	assert.NotEmpty(t, dsn)
 	connectionGetter := NewSqlServerStorageConnectionGetterFromDSN(dsn)
 	storage, err := NewSqlServerStorage(context.Background(), &SqlServerStorageOptions{
-		ConnectionProvider: connectionGetter,
-		TableName:          test_helper.TestTableName,
+		ConnectionManager: connectionGetter,
+		TableName:         test_helper.TestTableName,
 	})
 	assert.Nil(t, err)
 	test_helper.TestStorage(t, storage)

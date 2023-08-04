@@ -13,14 +13,16 @@ import (
 // TidbStorage 把锁存储在Tidb数据库中
 type TidbStorage struct {
 
-	// 其实底层实现跟MySQL是一样一样的
+	// 其实底层实现跟MySQL是一样一样的，这里就直接复用mysql的storage的逻辑了
 	*mysql_storage.MySQLStorage
 
+	// 创建storage的选项
 	options *TidbStorageOptions
 }
 
 var _ storage.Storage = &TidbStorage{}
 
+// NewTidbStorage 创建一个基于tidb的storage
 func NewTidbStorage(ctx context.Context, options *TidbStorageOptions) (*TidbStorage, error) {
 
 	mysqlStorage, err := mysql_storage.NewMySQLStorage(ctx, options.MySQLStorageOptions)

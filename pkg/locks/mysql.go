@@ -11,8 +11,8 @@ import (
 func NewMySQLStorageLock(ctx context.Context, lockId string, dsn string) (*storage_lock.StorageLock, error) {
 	connectionProvider := mysql_storage.NewMySQLConnectionProviderFromDSN(dsn)
 	storageOptions := &mysql_storage.MySQLStorageOptions{
-		ConnectionProvider: connectionProvider,
-		TableName:          storage.DefaultStorageTableName,
+		ConnectionManager: connectionProvider,
+		TableName:         storage.DefaultStorageTableName,
 	}
 
 	s, err := mysql_storage.NewMySQLStorage(ctx, storageOptions)

@@ -3,12 +3,15 @@ package storage_lock
 import (
 	"context"
 	"errors"
+	"github.com/google/uuid"
+	"strings"
 	"sync/atomic"
 	"time"
 )
 
 // LeaseRefreshGoroutine 用于在锁存在期间为锁的租约续期的协程，当前实现是每个锁在持有期间都会配备一个刷新锁的租约时间的协程
 type LeaseRefreshGoroutine struct {
+	id string
 
 	// 协程是否处在运行状态的标志位，为true表示处在运行状态，为false表示未处在运行状态
 	isRunning atomic.Bool
@@ -23,10 +26,15 @@ type LeaseRefreshGoroutine struct {
 // NewStorageLockWatchDog 创建一只看门狗
 func NewStorageLockWatchDog(lock *StorageLock, ownerId string) *LeaseRefreshGoroutine {
 	return &LeaseRefreshGoroutine{
+		id:          "watch-dog-" + strings.ReplaceAll(uuid.New().String(), "-", ""),
 		isRunning:   atomic.Bool{},
 		storageLock: lock,
 		ownerId:     ownerId,
 	}
+}
+
+func (x *LeaseRefreshGoroutine) GetID() string {
+	return x.id
 }
 
 // Start 启动看门狗协程

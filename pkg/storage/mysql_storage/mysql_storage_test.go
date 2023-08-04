@@ -14,8 +14,8 @@ func TestNewMySQLStorage(t *testing.T) {
 	assert.NotEmpty(t, dsn)
 	connectionGetter := NewMySQLConnectionProviderFromDSN(dsn)
 	s, err := NewMySQLStorage(context.Background(), &MySQLStorageOptions{
-		ConnectionProvider: connectionGetter,
-		TableName:          "storage_lock_test",
+		ConnectionManager: connectionGetter,
+		TableName:         "storage_lock_test",
 	})
 	assert.Nil(t, err)
 	test_helper.TestStorage(t, s)

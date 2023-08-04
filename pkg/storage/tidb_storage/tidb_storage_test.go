@@ -16,8 +16,8 @@ func TestNewTidbStorage(t *testing.T) {
 	connectionGetter := NewTidbConnectionProviderFromDSN(dsn)
 	storage, err := NewTidbStorage(context.Background(), &TidbStorageOptions{
 		MySQLStorageOptions: &mysql_storage.MySQLStorageOptions{
-			ConnectionProvider: connectionGetter,
-			TableName:          test_helper.TestTableName,
+			ConnectionManager: connectionGetter,
+			TableName:         test_helper.TestTableName,
 		},
 	})
 	assert.Nil(t, err)

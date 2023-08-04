@@ -11,8 +11,8 @@ package cassandra_storage
 //
 //// ------------------------------------------------- --------------------------------------------------------------------
 //
-//// ConnectionProvider 创建一个MySQL的连接
-//type ConnectionProvider struct {
+//// ConnectionManager 创建一个MySQL的连接
+//type ConnectionManager struct {
 //
 //	// 主机的名字
 //	Host string
@@ -38,18 +38,18 @@ package cassandra_storage
 //	once sync.Once
 //}
 //
-//var _ storage.ConnectionProvider[*sql.DB] = &ConnectionProvider{}
+//var _ storage.ConnectionManager[*sql.DB] = &ConnectionManager{}
 //
 //// NewMySQLStorageConnectionGetterFromDSN 从DSN创建MySQL连接
-//func NewMySQLStorageConnectionGetterFromDSN(dsn string) *ConnectionProvider {
-//	return &ConnectionProvider{
+//func NewMySQLStorageConnectionGetterFromDSN(dsn string) *ConnectionManager {
+//	return &ConnectionManager{
 //		DSN: dsn,
 //	}
 //}
 //
 //// NewMySQLStorageConnectionGetter 从服务器属性创建数据库连接
-//func NewMySQLStorageConnectionGetter(host string, port uint, user, passwd, database string) *ConnectionProvider {
-//	return &ConnectionProvider{
+//func NewMySQLStorageConnectionGetter(host string, port uint, user, passwd, database string) *ConnectionManager {
+//	return &ConnectionManager{
 //		Host:         host,
 //		Port:         port,
 //		User:         user,
@@ -58,8 +58,8 @@ package cassandra_storage
 //	}
 //}
 //
-//// Get 获取到数据库的连接
-//func (x *ConnectionProvider) Get(ctx context.Context) (*sql.DB, error) {
+//// Take 获取到数据库的连接
+//func (x *ConnectionManager) Take(ctx context.Context) (*sql.DB, error) {
 //	x.once.Do(func() {
 //		//db, err := sql.Open("mysql", x.GetDSN())
 //		//if err != nil {
@@ -83,7 +83,7 @@ package cassandra_storage
 //	return x.db, x.err
 //}
 //
-//func (x *ConnectionProvider) GetDSN() string {
+//func (x *ConnectionManager) GetDSN() string {
 //	if x.DSN != "" {
 //		return x.DSN
 //	}

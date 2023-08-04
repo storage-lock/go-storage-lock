@@ -42,8 +42,10 @@ func NewMariaDbStorage(ctx context.Context, options *MariaStorageOptions) (*Mari
 	return s, nil
 }
 
+const StorageName = "mariadb-storage"
+
 func (x *MariaDbStorage) GetName() string {
-	return "mariadb-storage"
+	return StorageName
 }
 
 func (x *MariaDbStorage) Init(ctx context.Context) error {

@@ -2,7 +2,7 @@ package postgresql_storage
 
 import (
 	"database/sql"
-	"github.com/storage-lock/go-storage-lock/pkg/storage"
+	"github.com/storage-lock/go-storage-lock/pkg/storage/connection_manager"
 )
 
 type PostgreSQLStorageOptions struct {
@@ -14,7 +14,7 @@ type PostgreSQLStorageOptions struct {
 	TableName string
 
 	// 用于获取数据库连接
-	ConnectionProvider storage.ConnectionProvider[*sql.DB]
+	ConnectionManager connection_manager.ConnectionManager[*sql.DB]
 }
 
 func NewPostgreSQLStorageOptions() *PostgreSQLStorageOptions {
@@ -23,17 +23,17 @@ func NewPostgreSQLStorageOptions() *PostgreSQLStorageOptions {
 	}
 }
 
-func (x *PostgreSQLStorageOptions) WithSchema(schema string) *PostgreSQLStorageOptions {
+func (x *PostgreSQLStorageOptions) SetSchema(schema string) *PostgreSQLStorageOptions {
 	x.Schema = schema
 	return x
 }
 
-func (x *PostgreSQLStorageOptions) WithTableName(tableName string) *PostgreSQLStorageOptions {
+func (x *PostgreSQLStorageOptions) SetTableName(tableName string) *PostgreSQLStorageOptions {
 	x.TableName = tableName
 	return x
 }
 
-func (x *PostgreSQLStorageOptions) WithConnectionProvider(connectionProvider storage.ConnectionProvider[*sql.DB]) *PostgreSQLStorageOptions {
-	x.ConnectionProvider = connectionProvider
+func (x *PostgreSQLStorageOptions) SetConnectionManager(connectionProvider connection_manager.ConnectionManager[*sql.DB]) *PostgreSQLStorageOptions {
+	x.ConnectionManager = connectionProvider
 	return x
 }

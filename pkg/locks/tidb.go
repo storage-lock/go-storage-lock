@@ -15,8 +15,8 @@ func NewTidbStorageLock(ctx context.Context, lockId string, dsn string) (*storag
 	connectionProvider := tidb_storage.NewTidbConnectionProviderFromDSN(dsn)
 	storageOptions := &tidb_storage.TidbStorageOptions{
 		MySQLStorageOptions: &mysql_storage.MySQLStorageOptions{
-			ConnectionProvider: connectionProvider,
-			TableName:          storage.DefaultStorageTableName,
+			ConnectionManager: connectionProvider,
+			TableName:         storage.DefaultStorageTableName,
 		},
 	}
 

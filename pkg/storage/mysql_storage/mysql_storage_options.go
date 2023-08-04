@@ -3,6 +3,7 @@ package mysql_storage
 import (
 	"database/sql"
 	"github.com/storage-lock/go-storage-lock/pkg/storage"
+	"github.com/storage-lock/go-storage-lock/pkg/storage/connection_manager"
 )
 
 // MySQLStorageOptions 基于MySQL为存储引擎时的选项
@@ -12,7 +13,7 @@ type MySQLStorageOptions struct {
 	TableName string
 
 	// 用于获取数据库连接
-	ConnectionProvider storage.ConnectionProvider[*sql.DB]
+	ConnectionManager connection_manager.ConnectionManager[*sql.DB]
 }
 
 func NewMySQLStorageOptions() *MySQLStorageOptions {
@@ -21,8 +22,8 @@ func NewMySQLStorageOptions() *MySQLStorageOptions {
 	}
 }
 
-func (x *MySQLStorageOptions) WithConnectionProvider(connProvider storage.ConnectionProvider[*sql.DB]) *MySQLStorageOptions {
-	x.ConnectionProvider = connProvider
+func (x *MySQLStorageOptions) WithConnectionProvider(connManager connection_manager.ConnectionManager[*sql.DB]) *MySQLStorageOptions {
+	x.ConnectionManager = connManager
 	return x
 }
 

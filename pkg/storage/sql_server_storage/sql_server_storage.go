@@ -2,12 +2,11 @@ package sql_server_storage
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"github.com/golang-infrastructure/go-iterator"
 	"github.com/storage-lock/go-storage-lock/pkg/storage"
-	"github.com/storage-lock/go-storage-lock/pkg/storage/base"
+	"github.com/storage-lock/go-storage-lock/pkg/storage/storage_base"
 	"github.com/storage-lock/go-storage-lock/pkg/storage_lock"
 	"time"
 
@@ -15,9 +14,7 @@ import (
 )
 
 type SqlServerStorage struct {
-	options *SqlServerStorageOptions
-
-	db            *sql.DB
+	options       *SqlServerStorageOptions
 	tableFullName string
 }
 
@@ -39,15 +36,20 @@ func NewSqlServerStorage(ctx context.Context, options *SqlServerStorageOptions) 
 	return storage, nil
 }
 
+const StorageName = "sql-server-storage"
+
 func (x *SqlServerStorage) GetName() string {
-	return "sql-server-storage"
+	return StorageName
 }
 
 func (x *SqlServerStorage) Init(ctx context.Context) error {
-	db, err := x.options.ConnectionProvider.Get(ctx)
+	db, err := x.options.ConnectionManager.Take(ctx)
 	if err != nil {
 		return err
 	}
+	defer func() {
+		_ = x.options.ConnectionManager.Return(ctx, db)
+	}()
 
 	// 创建存储锁信息需要的表
 	tableFullName := x.options.TableName
@@ -80,14 +82,22 @@ CREATE TABLE %s (
 	}
 
 	x.tableFullName = tableFullName
-	x.db = db
 
 	return nil
 }
 
 func (x *SqlServerStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion storage.Version, lockInformation *storage.LockInformation) error {
+
+	db, err := x.options.ConnectionManager.Take(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = x.options.ConnectionManager.Return(ctx, db)
+	}()
+
 	insertSql := fmt.Sprintf(`UPDATE %s SET version = ?, lock_information_json_string = ? WHERE lock_id = ? AND owner_id = ? AND version = ?`, x.tableFullName)
-	execContext, err := x.db.ExecContext(ctx, insertSql, newVersion, lockInformation.ToJsonString(), lockId, lockInformation.OwnerId, exceptedVersion)
+	execContext, err := db.ExecContext(ctx, insertSql, newVersion, lockInformation.ToJsonString(), lockId, lockInformation.OwnerId, exceptedVersion)
 	if err != nil {
 		return err
 	}
@@ -102,8 +112,17 @@ func (x *SqlServerStorage) UpdateWithVersion(ctx context.Context, lockId string,
 }
 
 func (x *SqlServerStorage) InsertWithVersion(ctx context.Context, lockId string, version storage.Version, lockInformation *storage.LockInformation) error {
+
+	db, err := x.options.ConnectionManager.Take(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = x.options.ConnectionManager.Return(ctx, db)
+	}()
+
 	insertSql := fmt.Sprintf(`INSERT INTO %s (lock_id, owner_id, version, lock_information_json_string) VALUES (?, ?, ?, ?)`, x.tableFullName)
-	execContext, err := x.db.ExecContext(ctx, insertSql, lockId, lockInformation.OwnerId, version, lockInformation.ToJsonString())
+	execContext, err := db.ExecContext(ctx, insertSql, lockId, lockInformation.OwnerId, version, lockInformation.ToJsonString())
 	if err != nil {
 		return err
 	}
@@ -118,8 +137,17 @@ func (x *SqlServerStorage) InsertWithVersion(ctx context.Context, lockId string,
 }
 
 func (x *SqlServerStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion storage.Version, lockInformation *storage.LockInformation) error {
+
+	db, err := x.options.ConnectionManager.Take(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = x.options.ConnectionManager.Return(ctx, db)
+	}()
+
 	deleteSql := fmt.Sprintf(`DELETE FROM %s WHERE lock_id = ? AND owner_id = ? AND version = ?`, x.tableFullName)
-	execContext, err := x.db.ExecContext(ctx, deleteSql, lockId, lockInformation.OwnerId, exceptedVersion)
+	execContext, err := db.ExecContext(ctx, deleteSql, lockId, lockInformation.OwnerId, exceptedVersion)
 	if err != nil {
 		return err
 	}
@@ -134,8 +162,17 @@ func (x *SqlServerStorage) DeleteWithVersion(ctx context.Context, lockId string,
 }
 
 func (x *SqlServerStorage) Get(ctx context.Context, lockId string) (string, error) {
+
+	db, err := x.options.ConnectionManager.Take(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		_ = x.options.ConnectionManager.Return(ctx, db)
+	}()
+
 	getLockSql := fmt.Sprintf("SELECT lock_information_json_string FROM %s WHERE lock_id = ?", x.tableFullName)
-	rs, err := x.db.Query(getLockSql, lockId)
+	rs, err := db.Query(getLockSql, lockId)
 	if err != nil {
 		return "", err
 	}
@@ -154,8 +191,17 @@ func (x *SqlServerStorage) Get(ctx context.Context, lockId string) (string, erro
 }
 
 func (x *SqlServerStorage) GetTime(ctx context.Context) (time.Time, error) {
+
+	db, err := x.options.ConnectionManager.Take(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer func() {
+		_ = x.options.ConnectionManager.Return(ctx, db)
+	}()
+
 	var zero time.Time
-	rs, err := x.db.Query("SELECT CURRENT_TIMESTAMP")
+	rs, err := db.Query("SELECT CURRENT_TIMESTAMP")
 	if err != nil {
 		return zero, err
 	}
@@ -175,16 +221,22 @@ func (x *SqlServerStorage) GetTime(ctx context.Context) (time.Time, error) {
 }
 
 func (x *SqlServerStorage) Close(ctx context.Context) error {
-	if x.db == nil {
-		return nil
-	}
-	return x.db.Close()
+	return nil
 }
 
 func (x *SqlServerStorage) List(ctx context.Context) (iterator.Iterator[*storage.LockInformation], error) {
-	rows, err := x.db.Query(fmt.Sprintf("SELECT * FROM %s", x.tableFullName))
+
+	db, err := x.options.ConnectionManager.Take(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return storage_base.NewRowsIterator(rows), nil
+	defer func() {
+		_ = x.options.ConnectionManager.Return(ctx, db)
+	}()
+
+	rows, err := db.Query(fmt.Sprintf("SELECT * FROM %s", x.tableFullName))
+	if err != nil {
+		return nil, err
+	}
+	return storage_base.NewSqlRowsIterator(rows), nil
 }

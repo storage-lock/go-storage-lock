@@ -3,6 +3,7 @@ package sql_server_storage
 import (
 	"database/sql"
 	"github.com/storage-lock/go-storage-lock/pkg/storage"
+	"github.com/storage-lock/go-storage-lock/pkg/storage/connection_manager"
 )
 
 type SqlServerStorageOptions struct {
@@ -11,7 +12,7 @@ type SqlServerStorageOptions struct {
 	TableName string
 
 	// 用于获取数据库连接
-	ConnectionProvider storage.ConnectionProvider[*sql.DB]
+	ConnectionManager connection_manager.ConnectionManager[*sql.DB]
 }
 
 func NewSqlServerStorageOptions() *SqlServerStorageOptions {
@@ -25,7 +26,7 @@ func (x *SqlServerStorageOptions) WithTableName(tableName string) *SqlServerStor
 	return x
 }
 
-func (x *SqlServerStorageOptions) WithConnectionProvider(connectionProvider storage.ConnectionProvider[*sql.DB]) *SqlServerStorageOptions {
-	x.ConnectionProvider = connectionProvider
+func (x *SqlServerStorageOptions) WithConnectionProvider(connectionManager connection_manager.ConnectionManager[*sql.DB]) *SqlServerStorageOptions {
+	x.ConnectionManager = connectionManager
 	return x
 }

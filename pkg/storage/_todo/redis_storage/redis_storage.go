@@ -24,7 +24,7 @@ package redis_storage
 //	client *redis.Client
 //}
 //
-//var _ ConnectionProvider[*redis.Client] = &RedisConfigurationConnectionGetter{}
+//var _ ConnectionManager[*redis.Client] = &RedisConfigurationConnectionGetter{}
 //
 //func NewRedisConfigurationConnectionGetter(address, passwd string, db ...int) *RedisConfigurationConnectionGetter {
 //	if len(db) == 0 {
@@ -37,7 +37,7 @@ package redis_storage
 //	}
 //}
 //
-//func (x *RedisConfigurationConnectionGetter) Get(ctx context.Context) (*redis.Client, error) {
+//func (x *RedisConfigurationConnectionGetter) Take(ctx context.Context) (*redis.Client, error) {
 //	if x.client == nil {
 //		x.client = redis.NewClient(&redis.Options{
 //			Addr:     x.Address,
@@ -51,12 +51,12 @@ package redis_storage
 //// ------------------------------------------------ ---------------------------------------------------------------------
 //
 //type RedisStorage struct {
-//	connectionGetter ConnectionProvider[*redis.Client]
+//	connectionGetter ConnectionManager[*redis.Client]
 //}
 //
 //var _ Storage = &RedisStorage{}
 //
-//func NewRedisStorage(connectionGetter ConnectionProvider[*redis.Client]) *RedisStorage {
+//func NewRedisStorage(connectionGetter ConnectionManager[*redis.Client]) *RedisStorage {
 //	return &RedisStorage{
 //		connectionGetter: connectionGetter,
 //	}
@@ -77,20 +77,20 @@ package redis_storage
 //}
 //
 //func (x *RedisStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion Version, lockInformation *LockInformation) error {
-//	client, err := x.connectionGetter.Get(ctx)
+//	client, err := x.connectionGetter.Take(ctx)
 //	if err != nil {
 //		return err
 //	}
 //	client.Del(ctx, x.buildLockKey(lockId))
 //}
 //
-//func (x *RedisStorage) Get(ctx context.Context, lockId string) (string, error) {
+//func (x *RedisStorage) Take(ctx context.Context, lockId string) (string, error) {
 //	var zero time.Time
-//	client, err := x.connectionGetter.Get(ctx)
+//	client, err := x.connectionGetter.Take(ctx)
 //	if err != nil {
 //		return "", err
 //	}
-//	get := client.Get(ctx, lockId)
+//	get := client.Take(ctx, lockId)
 //	get.
 //
 //}
@@ -98,7 +98,7 @@ package redis_storage
 //// GetTime 获取Redis服务器的时间
 //func (x *RedisStorage) GetTime(ctx context.Context) (time.Time, error) {
 //	var zero time.Time
-//	client, err := x.connectionGetter.Get(ctx)
+//	client, err := x.connectionGetter.Take(ctx)
 //	if err != nil {
 //		return zero, err
 //	}

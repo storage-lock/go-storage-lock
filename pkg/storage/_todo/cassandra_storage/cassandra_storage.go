@@ -33,7 +33,7 @@ package cassandra_storage
 //	panic("implement me")
 //}
 //
-//func (x *CassandraStorage) Get(ctx context.Context, lockId string) (string, error) {
+//func (x *CassandraStorage) Take(ctx context.Context, lockId string) (string, error) {
 //	//TODO implement me
 //	panic("implement me")
 //}

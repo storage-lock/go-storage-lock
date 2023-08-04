@@ -14,8 +14,8 @@ func TestNewPostgreSQLStorage(t *testing.T) {
 	assert.NotEmpty(t, dsn)
 	connectionGetter := NewPostgreSQLConnectionGetterFromDSN(dsn)
 	s, err := NewPostgreSQLStorage(context.Background(), &PostgreSQLStorageOptions{
-		ConnectionProvider: connectionGetter,
-		TableName:          test_helper.TestTableName,
+		ConnectionManager: connectionGetter,
+		TableName:         test_helper.TestTableName,
 	})
 	assert.Nil(t, err)
 	test_helper.TestStorage(t, s)

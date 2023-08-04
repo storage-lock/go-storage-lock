@@ -9,7 +9,7 @@ import (
 
 // NewMongoStorageLock 高层API，使用默认配置快速创建基于Mongo的分布式锁
 func NewMongoStorageLock(ctx context.Context, lockId string, uri string) (*storage_lock.StorageLock, error) {
-	connectionGetter := mongodb_storage.NewMongoConnectionProvider(uri)
+	connectionGetter := mongodb_storage.NewMongoConnectionManager(uri)
 	storageOptions := &mongodb_storage.MongoStorageOptions{
 		ConnectionProvider: connectionGetter,
 		DatabaseName:       storage.DefaultStorageTableName,

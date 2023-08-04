@@ -11,8 +11,8 @@ import (
 func NewSqlServerStorageLock(ctx context.Context, lockId string, dsn string) (*storage_lock.StorageLock, error) {
 	connectionGetter := sql_server_storage.NewSqlServerStorageConnectionGetterFromDSN(dsn)
 	storageOptions := &sql_server_storage.SqlServerStorageOptions{
-		ConnectionProvider: connectionGetter,
-		TableName:          storage.DefaultStorageTableName,
+		ConnectionManager: connectionGetter,
+		TableName:         storage.DefaultStorageTableName,
 	}
 
 	s, err := sql_server_storage.NewSqlServerStorage(ctx, storageOptions)

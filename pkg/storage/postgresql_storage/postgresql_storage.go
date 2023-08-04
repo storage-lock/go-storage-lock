@@ -2,12 +2,11 @@ package postgresql_storage
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"github.com/golang-infrastructure/go-iterator"
 	"github.com/storage-lock/go-storage-lock/pkg/storage"
-	"github.com/storage-lock/go-storage-lock/pkg/storage/base"
+	"github.com/storage-lock/go-storage-lock/pkg/storage/storage_base"
 	"github.com/storage-lock/go-storage-lock/pkg/storage_lock"
 	"time"
 
@@ -16,9 +15,7 @@ import (
 
 // PostgreSQLStorage 基于Postgresql作为存储引擎
 type PostgreSQLStorage struct {
-	options *PostgreSQLStorageOptions
-
-	db            *sql.DB
+	options       *PostgreSQLStorageOptions
 	tableFullName string
 }
 
@@ -42,10 +39,13 @@ func (x *PostgreSQLStorage) GetName() string {
 }
 
 func (x *PostgreSQLStorage) Init(ctx context.Context) error {
-	db, err := x.options.ConnectionProvider.Get(ctx)
+	db, err := x.options.ConnectionManager.Take(ctx)
 	if err != nil {
 		return err
 	}
+	defer func() {
+		_ = x.options.ConnectionManager.Return(ctx, db)
+	}()
 
 	// 如果设置了数据库的话需要切换数据库
 	if x.options.Schema != "" {
@@ -78,14 +78,22 @@ func (x *PostgreSQLStorage) Init(ctx context.Context) error {
 	}
 
 	x.tableFullName = tableFullName
-	x.db = db
 
 	return nil
 }
 
 func (x *PostgreSQLStorage) UpdateWithVersion(ctx context.Context, lockId string, exceptedVersion, newVersion storage.Version, lockInformation *storage.LockInformation) error {
+
+	db, err := x.options.ConnectionManager.Take(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = x.options.ConnectionManager.Return(ctx, db)
+	}()
+
 	insertSql := fmt.Sprintf(`UPDATE %s SET version = $1, lock_information_json_string = $2 WHERE lock_id = $3 AND owner_id = $4 AND version = $5`, x.tableFullName)
-	execContext, err := x.db.ExecContext(ctx, insertSql, newVersion, lockInformation.ToJsonString(), lockId, lockInformation.OwnerId, exceptedVersion)
+	execContext, err := db.ExecContext(ctx, insertSql, newVersion, lockInformation.ToJsonString(), lockId, lockInformation.OwnerId, exceptedVersion)
 	if err != nil {
 		return err
 	}
@@ -100,8 +108,17 @@ func (x *PostgreSQLStorage) UpdateWithVersion(ctx context.Context, lockId string
 }
 
 func (x *PostgreSQLStorage) InsertWithVersion(ctx context.Context, lockId string, version storage.Version, lockInformation *storage.LockInformation) error {
+
+	db, err := x.options.ConnectionManager.Take(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = x.options.ConnectionManager.Return(ctx, db)
+	}()
+
 	insertSql := fmt.Sprintf(`INSERT INTO %s (lock_id, owner_id, version, lock_information_json_string) VALUES ($1, $2, $3, $4)`, x.tableFullName)
-	execContext, err := x.db.ExecContext(ctx, insertSql, lockId, lockInformation.OwnerId, version, lockInformation.ToJsonString())
+	execContext, err := db.ExecContext(ctx, insertSql, lockId, lockInformation.OwnerId, version, lockInformation.ToJsonString())
 	if err != nil {
 		return err
 	}
@@ -116,8 +133,17 @@ func (x *PostgreSQLStorage) InsertWithVersion(ctx context.Context, lockId string
 }
 
 func (x *PostgreSQLStorage) DeleteWithVersion(ctx context.Context, lockId string, exceptedVersion storage.Version, lockInformation *storage.LockInformation) error {
+
+	db, err := x.options.ConnectionManager.Take(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = x.options.ConnectionManager.Return(ctx, db)
+	}()
+
 	deleteSql := fmt.Sprintf(`DELETE FROM %s WHERE lock_id = $1 AND owner_id = $2 AND version = $3`, x.tableFullName)
-	execContext, err := x.db.ExecContext(ctx, deleteSql, lockId, lockInformation.OwnerId, exceptedVersion)
+	execContext, err := db.ExecContext(ctx, deleteSql, lockId, lockInformation.OwnerId, exceptedVersion)
 	if err != nil {
 		return err
 	}
@@ -132,8 +158,17 @@ func (x *PostgreSQLStorage) DeleteWithVersion(ctx context.Context, lockId string
 }
 
 func (x *PostgreSQLStorage) Get(ctx context.Context, lockId string) (string, error) {
+
+	db, err := x.options.ConnectionManager.Take(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		_ = x.options.ConnectionManager.Return(ctx, db)
+	}()
+
 	getLockSql := fmt.Sprintf("SELECT lock_information_json_string FROM %s WHERE lock_id = $1", x.tableFullName)
-	rs, err := x.db.Query(getLockSql, lockId)
+	rs, err := db.Query(getLockSql, lockId)
 	if err != nil {
 		return "", err
 	}
@@ -152,8 +187,17 @@ func (x *PostgreSQLStorage) Get(ctx context.Context, lockId string) (string, err
 }
 
 func (x *PostgreSQLStorage) GetTime(ctx context.Context) (time.Time, error) {
+
+	db, err := x.options.ConnectionManager.Take(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer func() {
+		_ = x.options.ConnectionManager.Return(ctx, db)
+	}()
+
 	var zero time.Time
-	rs, err := x.db.Query("SELECT CURRENT_TIMESTAMP")
+	rs, err := db.Query("SELECT CURRENT_TIMESTAMP")
 	if err != nil {
 		return zero, err
 	}
@@ -173,16 +217,22 @@ func (x *PostgreSQLStorage) GetTime(ctx context.Context) (time.Time, error) {
 }
 
 func (x *PostgreSQLStorage) Close(ctx context.Context) error {
-	if x.db == nil {
-		return nil
-	}
-	return x.db.Close()
+	return nil
 }
 
 func (x *PostgreSQLStorage) List(ctx context.Context) (iterator.Iterator[*storage.LockInformation], error) {
-	rows, err := x.db.Query("SELECT * FROM %s", x.tableFullName)
+
+	db, err := x.options.ConnectionManager.Take(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return storage_base.NewRowsIterator(rows), nil
+	defer func() {
+		_ = x.options.ConnectionManager.Return(ctx, db)
+	}()
+
+	rows, err := db.Query("SELECT * FROM %s", x.tableFullName)
+	if err != nil {
+		return nil, err
+	}
+	return storage_base.NewSqlRowsIterator(rows), nil
 }
