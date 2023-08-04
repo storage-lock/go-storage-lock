@@ -43,7 +43,7 @@ func NewStorageLockWatchDog(e *events.Event, lock *StorageLock, ownerId string) 
 		SetStorageName(lock.storage.GetName())
 
 	// 发送创建看门狗的事件
-	e.Fork().AppendActionByName("create-watch-dog").Publish(context.Background())
+	e.Fork().AddActionByName("create-watch-dog").Publish(context.Background())
 
 	return &LeaseRefreshGoroutine{
 		id:          id,
@@ -60,7 +60,7 @@ func (x *LeaseRefreshGoroutine) GetID() string {
 // Start 启动看门狗协程
 func (x *LeaseRefreshGoroutine) Start() {
 
-	x.e.Fork().AppendActionByName("start-watch-dog").Publish(context.Background())
+	x.e.Fork().AddActionByName("start-watch-dog").Publish(context.Background())
 
 	x.isRunning.Store(true)
 	go func() {
@@ -101,18 +101,18 @@ func (x *LeaseRefreshGoroutine) Stop() {
 // 刷新锁的过期时间，为其续约
 func (x *LeaseRefreshGoroutine) refreshLeaseExpiredTime(ctx context.Context) error {
 
-	e := x.e.Fork().AppendActionByName(ActionWatchDogRefreshLease)
+	e := x.e.Fork().AddActionByName(ActionWatchDogRefreshLease)
 
 	information, err := x.storageLock.getLockInformation(ctx, x.e)
 	if err != nil {
 
 		// 如果是锁已经不存在了，则先将续租协程停掉，以免在短时间内进行大量获取释放操作时挤压了太多无用的续租协程过慢的退出
 		if errors.Is(err, ErrLockNotFound) {
-			e.AppendAction(events.NewAction(ActionLockNotFoundError).SetErr(err))
+			e.AddAction(events.NewAction(ActionLockNotFoundError).SetErr(err))
 			x.Stop()
-			e.AppendActionByName(ActionWatchDogStop)
+			e.AddActionByName(ActionWatchDogStop)
 		} else {
-			e.AppendAction(events.NewAction(ActionGetLockInformationError).SetErr(err))
+			e.AddAction(events.NewAction(ActionGetLockInformationError).SetErr(err))
 		}
 
 		e.Publish(ctx)
@@ -121,9 +121,9 @@ func (x *LeaseRefreshGoroutine) refreshLeaseExpiredTime(ctx context.Context) err
 
 	// 锁已经不是自己持有了，则直接退出，每个续租协程都是很忠贞的只为一个owner续租
 	if information.OwnerId != x.ownerId {
-		e.AppendAction(events.NewAction(ActionNotLockOwner).SetPayload(information.ToJsonString()))
+		e.AddAction(events.NewAction(ActionNotLockOwner).SetPayload(information.ToJsonString()))
 		x.Stop()
-		e.AppendActionByName(ActionWatchDogStop).Publish(ctx)
+		e.AddActionByName(ActionWatchDogStop).Publish(ctx)
 		return ErrLockNotBelongYou
 	}
 
@@ -132,7 +132,7 @@ func (x *LeaseRefreshGoroutine) refreshLeaseExpiredTime(ctx context.Context) err
 
 	expireTime, err := x.storageLock.getLeaseExpireTime(ctx, e)
 	if err != nil {
-		e.AppendAction(events.NewAction("getLeaseExpireTime-error").SetErr(err)).Publish(ctx)
+		e.AddAction(events.NewAction("getLeaseExpireTime-error").SetErr(err)).Publish(ctx)
 		return err
 	}
 
@@ -140,7 +140,7 @@ func (x *LeaseRefreshGoroutine) refreshLeaseExpiredTime(ctx context.Context) err
 
 	updateAction := events.NewAction(ActionStorageUpdateWithVersion)
 	err = x.storageLock.storage.UpdateWithVersion(ctx, x.storageLock.options.LockId, lastVersion, information.Version, information)
-	e.Fork().AppendAction(updateAction.End().SetErr(err)).SetLockInformation(information).Publish(ctx)
+	e.Fork().AddAction(updateAction.End().SetErr(err)).SetLockInformation(information).Publish(ctx)
 
 	return err
 }

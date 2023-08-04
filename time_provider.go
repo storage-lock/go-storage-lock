@@ -68,13 +68,13 @@ func (x *NTPTimeProvider) GetTime(ctx context.Context, e *events.Event) (time.Ti
 		now, err := ntp.Time(server)
 
 		if err != nil {
-			e.Fork().AppendAction(events.NewAction(ActionNtpError).SetErr(err)).Publish(ctx)
+			e.Fork().AddAction(events.NewAction(ActionNtpError).SetErr(err)).Publish(ctx)
 			lastError = err
 			continue
 		}
 
 		if now.IsZero() {
-			e.Fork().AppendAction(events.NewAction(ActionNtpZero)).Publish(ctx)
+			e.Fork().AddAction(events.NewAction(ActionNtpZero)).Publish(ctx)
 			continue
 		}
 
