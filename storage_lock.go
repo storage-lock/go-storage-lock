@@ -3,13 +3,14 @@ package storage_lock
 import (
 	"context"
 	"errors"
+	"math/rand"
+	"time"
+
 	variable_parameter "github.com/golang-infrastructure/go-variable-parameter"
 	"github.com/storage-lock/go-events"
 	"github.com/storage-lock/go-storage"
 	storage_events "github.com/storage-lock/go-storage-events"
 	"github.com/storage-lock/go-utils"
-	"math/rand"
-	"time"
 )
 
 // StorageLock 基于存储介质的锁模型实现，底层存储介质是可插拔的
@@ -61,7 +62,7 @@ func NewStorageLock(storage storage.Storage, options ...*StorageLockOptions) *St
 	// 仅当锁被持有的时候才启动这个协程，否则的话可能会有协程残留
 	//lock.storageLockWatchDog = NewStorageLockWatchDog(lock)
 
-	e.Publish(context.Background())
+	//e.Publish(context.Background())
 
 	return lock
 }
@@ -79,8 +80,10 @@ func (x *StorageLock) Lock(ctx context.Context, ownerId ...string) error {
 
 	e.Fork().AddActionByName("begin").Publish(ctx)
 
-	for {
+	ticker := time.NewTicker(time.Microsecond)
+	defer ticker.Stop()
 
+	for {
 		err := x.lockWithRetry(ctx, e.Fork(), ownerId...)
 		if err == nil {
 			e.AddActionByName(ActionLockSuccess).Publish(ctx)
@@ -93,10 +96,9 @@ func (x *StorageLock) Lock(ctx context.Context, ownerId ...string) error {
 		case <-ctx.Done():
 			e.AddActionByName(ActionTimeout).Publish(ctx)
 			return err
-		case <-time.After(time.Microsecond):
+		case <-ticker.C:
 			e.Fork().AddActionByName(ActionSleepRetry).Publish(ctx)
-			time.Sleep(time.Second * time.Duration(rand.Intn(5)+1))
-			continue
+			ticker.Reset(time.Second * time.Duration(rand.Intn(5)+1))
 		}
 	}
 }
@@ -187,7 +189,7 @@ func (x *StorageLock) reentryLock(ctx context.Context, e *events.Event, ownerId 
 
 	// 执行到这里，如果没更新成功，并且还有重试次数的话则重试
 	select {
-	case <-time.After(time.Microsecond):
+	default:
 		// 还有时间，再重试一次
 		e.AddActionByName("to-lockWithRetry").Publish(ctx)
 		return x.lockWithRetry(ctx, e.Fork(), ownerId)
@@ -224,6 +226,7 @@ func (x *StorageLock) cleanExpiredLockAndRetry(ctx context.Context, e *events.Ev
 	// 别人持有的锁过期了，啊哈哈，那我给它删掉清理一下吧
 	// 这个返回的错误会被忽略，删除直接重试，这里的删除可能会失败，比如当出现并发情况时只有一个人能删除成功其它人都会失败
 	// TODO 2023-1-27 18:53:41 思考这样搞会不会有什么问题
+	// TODO CAS更新,如果版本不一致则删除失败,这样就不会有并发问题了(直接更新成自己的,不在抢占这样逻辑是不是会好一些
 	err = x.storageExecutor.DeleteWithVersion(ctx, e.Fork(), x.options.LockId, lockInformation.Version, lockInformation)
 	if err != nil {
 		e.AddAction(events.NewAction("DeleteWithVersion-err").SetErr(err))
@@ -273,7 +276,7 @@ func (x *StorageLock) lockNotExists(ctx context.Context, e *events.Event, ownerI
 		case <-ctx.Done():
 			e.AddActionByName(ActionTimeout).Publish(ctx)
 			return ErrLockFailed
-		case <-time.After(time.Microsecond):
+		default:
 			e.AddActionByName(ActionSleepRetry).Publish(ctx)
 			return x.lockWithRetry(ctx, e.Fork(), ownerId)
 		}
@@ -318,6 +321,9 @@ func (x *StorageLock) UnLock(ctx context.Context, ownerId ...string) error {
 
 	e.Fork().AddActionByName("begin").Publish(ctx)
 
+	ticker := time.NewTicker(time.Microsecond)
+	defer ticker.Stop()
+
 	for {
 
 		err := x.unlockWithRetry(ctx, e.Fork(), ownerId...)
@@ -332,10 +338,9 @@ func (x *StorageLock) UnLock(ctx context.Context, ownerId ...string) error {
 		case <-ctx.Done():
 			e.AddActionByName(ActionTimeout).Publish(ctx)
 			return err
-		case <-time.After(time.Microsecond):
+		case <-ticker.C:
 			e.Fork().AddActionByName(ActionSleepRetry).Publish(ctx)
-			time.Sleep(time.Second * time.Duration(rand.Intn(5)+1))
-			continue
+			ticker.Reset(time.Second * time.Duration(rand.Intn(5)+1))
 		}
 	}
 }
@@ -426,7 +431,7 @@ func (x *StorageLock) reentryUnlock(ctx context.Context, e *events.Event, ownerI
 		// 更新失败，并且也没有重试次数了，则只好返回错误
 		e.AddActionByName(ActionTimeout).Publish(ctx)
 		return ErrUnlockFailed
-	case <-time.After(time.Microsecond):
+	default:
 		// 我还有重试次数，我要尝试重试
 		e.AddActionByName(ActionSleepRetry).Publish(ctx)
 		return x.unlockWithRetry(ctx, e.Fork(), ownerId)
@@ -455,7 +460,7 @@ func (x *StorageLock) unlockWithClean(ctx context.Context, e *events.Event, owne
 				// 没有重试次数了，则只好返回错误
 				e.AddActionByName(ActionTimeout).Publish(ctx)
 				return ErrLockFailed
-			case <-time.After(time.Microsecond):
+			default:
 				e.AddActionByName(ActionSleepRetry).Publish(ctx)
 				return x.unlockWithRetry(ctx, e.Fork(), ownerId)
 			}
