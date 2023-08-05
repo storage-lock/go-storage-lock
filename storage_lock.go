@@ -186,10 +186,12 @@ func (x *StorageLock) reentryLock(ctx context.Context, e *events.Event, ownerId 
 		return err
 	}
 	e.AddActionByName("UpdateWithVersion-miss")
-
+	timer := time.NewTimer(time.Millisecond)
+	defer timer.Stop()
 	// 执行到这里，如果没更新成功，并且还有重试次数的话则重试
 	select {
-	default:
+	case <-timer.C:
+
 		// 还有时间，再重试一次
 		e.AddActionByName("to-lockWithRetry").Publish(ctx)
 		return x.lockWithRetry(ctx, e.Fork(), ownerId)
@@ -226,7 +228,6 @@ func (x *StorageLock) cleanExpiredLockAndRetry(ctx context.Context, e *events.Ev
 	// 别人持有的锁过期了，啊哈哈，那我给它删掉清理一下吧
 	// 这个返回的错误会被忽略，删除直接重试，这里的删除可能会失败，比如当出现并发情况时只有一个人能删除成功其它人都会失败
 	// TODO 2023-1-27 18:53:41 思考这样搞会不会有什么问题
-	// TODO CAS更新,如果版本不一致则删除失败,这样就不会有并发问题了(直接更新成自己的,不在抢占这样逻辑是不是会好一些
 	err = x.storageExecutor.DeleteWithVersion(ctx, e.Fork(), x.options.LockId, lockInformation.Version, lockInformation)
 	if err != nil {
 		e.AddAction(events.NewAction("DeleteWithVersion-err").SetErr(err))
@@ -271,12 +272,13 @@ func (x *StorageLock) lockNotExists(ctx context.Context, e *events.Event, ownerI
 	if err != nil {
 
 		e.AddAction(events.NewAction("InsertWithVersion-error").SetErr(err))
-
+		timer := time.NewTimer(time.Millisecond)
+		defer timer.Stop()
 		select {
 		case <-ctx.Done():
 			e.AddActionByName(ActionTimeout).Publish(ctx)
 			return ErrLockFailed
-		default:
+		case <-timer.C:
 			e.AddActionByName(ActionSleepRetry).Publish(ctx)
 			return x.lockWithRetry(ctx, e.Fork(), ownerId)
 		}
@@ -425,13 +427,16 @@ func (x *StorageLock) reentryUnlock(ctx context.Context, e *events.Event, ownerI
 	}
 	e.AddAction(events.NewAction("UpdateWithVersion-miss"))
 
+	timer := time.NewTimer(time.Millisecond)
+	defer timer.Stop()
 	// 更新未成功，看下是否还有重试次数
 	select {
 	case <-ctx.Done():
 		// 更新失败，并且也没有重试次数了，则只好返回错误
 		e.AddActionByName(ActionTimeout).Publish(ctx)
 		return ErrUnlockFailed
-	default:
+	case <-timer.C:
+
 		// 我还有重试次数，我要尝试重试
 		e.AddActionByName(ActionSleepRetry).Publish(ctx)
 		return x.unlockWithRetry(ctx, e.Fork(), ownerId)
@@ -453,14 +458,15 @@ func (x *StorageLock) unlockWithClean(ctx context.Context, e *events.Event, owne
 		if errors.Is(err, ErrVersionMiss) {
 
 			e.AddActionByName("DeleteWithVersion-miss")
-
+			timer := time.NewTimer(time.Millisecond)
+			defer timer.Stop()
 			// 还有重试次数，则再次尝试删除锁
 			select {
 			case <-ctx.Done():
 				// 没有重试次数了，则只好返回错误
 				e.AddActionByName(ActionTimeout).Publish(ctx)
 				return ErrLockFailed
-			default:
+			case <-timer.C:
 				e.AddActionByName(ActionSleepRetry).Publish(ctx)
 				return x.unlockWithRetry(ctx, e.Fork(), ownerId)
 			}
