@@ -43,7 +43,7 @@ func NewStorageLockWatchDog(e *events.Event, lock *StorageLock, ownerId string) 
 		SetStorageName(lock.storage.GetName())
 
 	// 发送创建看门狗的事件
-	e.Fork().AddActionByName("create-watch-dog").Publish(context.Background())
+	e.Fork().AddActionByName(ActionWatchDogCreate).Publish(context.Background())
 
 	return &LeaseRefreshGoroutine{
 		id:          id,
@@ -60,13 +60,15 @@ func (x *LeaseRefreshGoroutine) GetID() string {
 // Start 启动看门狗协程
 func (x *LeaseRefreshGoroutine) Start() {
 
-	x.e.Fork().AddActionByName("start-watch-dog").Publish(context.Background())
+	x.e.Fork().AddActionByName(ActionWatchDogStart).Publish(context.Background())
 
 	x.isRunning.Store(true)
 	go func() {
 		// 统计连续多少次发生错误了
 		continueErrorCount := 0
 		for x.isRunning.Load() {
+
+			x.e.Fork().AddAction(events.NewAction("watch-dog-look-begin").AddPayload("continueErrorCount", continueErrorCount)).Publish(context.Background())
 
 			// 超时时间设置为租约有效期的一半，这样子相当于有两次机会，但是超时最短不能小于半分钟，这是为了兼容有些存储介质可能会比较慢的情况
 			timeout := (x.storageLock.options.LeaseExpireAfter - x.storageLock.options.LeaseRefreshInterval) / 2
@@ -82,14 +84,25 @@ func (x *LeaseRefreshGoroutine) Start() {
 				// 连续失败次数太多把自己关掉
 				if continueErrorCount > 10 {
 					x.Stop()
+					x.e.Fork().AddAction(events.NewAction("watch-dog-continueErrorCount-stop").AddPayload("continueErrorCount", continueErrorCount)).Publish(context.Background())
 				}
+				x.e.Fork().
+					AddAction(events.NewAction("watch-dog-refreshLeaseExpiredTime-error").AddPayload("continueErrorCount", continueErrorCount).SetErr(err)).
+					Publish(context.Background())
 			} else {
 				continueErrorCount = 0
+				x.e.Fork().
+					AddAction(events.NewAction("watch-dog-refreshLeaseExpiredTime-success").AddPayload("continueErrorCount", continueErrorCount).SetErr(err)).
+					Publish(context.Background())
 			}
 
 			// 休眠，避免刷新得太频繁导致乐观锁的版本miss率过高
 			time.Sleep(x.storageLock.options.LeaseRefreshInterval)
 		}
+
+		// 给一个退出信号
+		x.e.AddActionByName("watch-dog-by-name").Publish(context.Background())
+
 	}()
 }
 
@@ -138,9 +151,7 @@ func (x *LeaseRefreshGoroutine) refreshLeaseExpiredTime(ctx context.Context) err
 
 	information.LeaseExpireTime = expireTime
 
-	updateAction := events.NewAction(ActionStorageUpdateWithVersion)
-	err = x.storageLock.storage.UpdateWithVersion(ctx, x.storageLock.options.LockId, lastVersion, information.Version, information)
-	e.Fork().AddAction(updateAction.End().SetErr(err)).SetLockInformation(information).Publish(ctx)
+	err = x.storageLock.storageExecutor.UpdateWithVersion(ctx, e.Fork(), x.storageLock.options.LockId, lastVersion, information.Version, information)
 
 	return err
 }

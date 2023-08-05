@@ -6,6 +6,7 @@ import (
 	variable_parameter "github.com/golang-infrastructure/go-variable-parameter"
 	"github.com/storage-lock/go-events"
 	"github.com/storage-lock/go-storage"
+	storage_events "github.com/storage-lock/go-storage-events"
 	"github.com/storage-lock/go-utils"
 	"math/rand"
 	"time"
@@ -16,6 +17,9 @@ type StorageLock struct {
 
 	// 锁持久化存储到哪个存储介质上
 	storage storage.Storage
+	// 调用storage方法的时候不会直接调用，而是通过一层带事件监听和recover包着的执行器来调用
+	storageExecutor *storage_events.WithEventSafeExecutor
+
 	// 锁的一些选项，可以高度定制化锁的行为
 	options *StorageLockOptions
 
@@ -49,6 +53,7 @@ func NewStorageLock(storage storage.Storage, options ...*StorageLockOptions) *St
 
 	lock := &StorageLock{
 		storage:          storage,
+		storageExecutor:  storage_events.NewWithEventSafeExecutor(storage),
 		options:          option,
 		ownerIdGenerator: NewOwnerIdGenerator(),
 	}
@@ -166,13 +171,7 @@ func (x *StorageLock) reentryLock(ctx context.Context, e *events.Event, ownerId 
 	lockInformation.LeaseExpireTime = expireTime
 
 	// 然后尝试把新的锁的信息更新回存储介质中
-	updateAction := events.NewAction(ActionStorageUpdateWithVersion)
-	err = x.storage.UpdateWithVersion(ctx, x.options.LockId, oldVersion, lockInformation.Version, lockInformation)
-	e.Fork().
-		AddAction(updateAction.End().SetErr(err).AddPayload("exceptedVersion", oldVersion).AddPayload("newVersion", lockInformation.Version)).
-		SetLockInformation(lockInformation).
-		Publish(ctx)
-
+	err = x.storageExecutor.UpdateWithVersion(ctx, e.Fork(), x.options.LockId, oldVersion, lockInformation.Version, lockInformation)
 	// 更新成功，则本次获取锁成功，可重入锁的层级又深了一层
 	if err == nil {
 		e.AddActionByName("UpdateWithVersion-success").Publish(ctx)
@@ -208,9 +207,7 @@ func (x *StorageLock) cleanExpiredLockAndRetry(ctx context.Context, e *events.Ev
 	// 一种是持有锁的人在租约期内，那这个时候只能老老实实的等待
 	// 还有一种情况是上次持有锁的人可能没有能正常退出释放锁，锁被残留在了数据库中，这个时候锁虽然存在，但是已经过了租约的有效期，
 	// 因此这种情况是可以尝试清除掉无效的锁，然后大家再重新竞争锁的
-	getTimeAction := events.NewAction(ActionStorageGetTime)
-	storageTime, err := x.storage.GetTime(ctx)
-	e.Fork().AddAction(getTimeAction.End().SetErr(err).AddPayload("time", storageTime)).Publish(ctx)
+	storageTime, err := x.storageExecutor.GetTime(ctx, e.Fork())
 	if err != nil {
 		e.AddAction(events.NewAction("GetTime-error").SetErr(err)).Publish(ctx)
 		return err
@@ -227,9 +224,7 @@ func (x *StorageLock) cleanExpiredLockAndRetry(ctx context.Context, e *events.Ev
 	// 别人持有的锁过期了，啊哈哈，那我给它删掉清理一下吧
 	// 这个返回的错误会被忽略，删除直接重试，这里的删除可能会失败，比如当出现并发情况时只有一个人能删除成功其它人都会失败
 	// TODO 2023-1-27 18:53:41 思考这样搞会不会有什么问题
-	deleteAction := events.NewAction(ActionStorageDeleteWithVersion)
-	err = x.storage.DeleteWithVersion(ctx, x.options.LockId, lockInformation.Version, lockInformation)
-	e.Fork().AddAction(deleteAction.End().SetErr(err).AddPayload("exceptedVersion", lockInformation.Version)).Publish(ctx)
+	err = x.storageExecutor.DeleteWithVersion(ctx, e.Fork(), x.options.LockId, lockInformation.Version, lockInformation)
 	if err != nil {
 		e.AddAction(events.NewAction("DeleteWithVersion-err").SetErr(err))
 	} else {
@@ -248,9 +243,7 @@ func (x *StorageLock) lockNotExists(ctx context.Context, e *events.Event, ownerI
 	e.AddActionByName("begin-lockNotExists").SetLockInformation(lockInformation)
 
 	// 获取Storage的时间
-	getTimeAction := events.NewAction(ActionStorageGetTime)
-	storageTime, err := x.storage.GetTime(ctx)
-	e.Fork().AddAction(getTimeAction.End().SetErr(err).AddPayload("time", storageTime)).Publish(ctx)
+	storageTime, err := x.storageExecutor.GetTime(ctx, e.Fork())
 	if err != nil {
 		e.AddAction(events.NewAction("GetTime-error").SetErr(err)).Publish(ctx)
 		return err
@@ -271,9 +264,7 @@ func (x *StorageLock) lockNotExists(ctx context.Context, e *events.Event, ownerI
 	}
 	e.SetLockInformation(lockInformation)
 
-	insertAction := events.NewAction(ActionStorageInsertWithVersion)
-	err = x.storage.InsertWithVersion(ctx, x.options.LockId, lockInformation.Version, lockInformation)
-	e.Fork().AddAction(insertAction.End().SetErr(err).AddPayload("version", lockInformation.Version)).SetLockInformation(lockInformation).Publish(ctx)
+	err = x.storageExecutor.InsertWithVersion(ctx, e.Fork(), x.options.LockId, lockInformation.Version, lockInformation)
 	if err != nil {
 
 		e.AddAction(events.NewAction("InsertWithVersion-error").SetErr(err))
@@ -306,11 +297,7 @@ func (x *StorageLock) lockNotExists(ctx context.Context, e *events.Event, ownerI
 
 // 获取租约下一次的过期时间
 func (x *StorageLock) getLeaseExpireTime(ctx context.Context, e *events.Event) (time.Time, error) {
-
-	getTimeAction := events.NewAction(ActionStorageGetTime)
-	storageTime, err := x.storage.GetTime(ctx)
-	e.Fork().AddAction(getTimeAction.End().SetErr(err).AddPayload("time", storageTime.String())).Publish(ctx)
-
+	storageTime, err := x.storageExecutor.GetTime(ctx, e.Fork())
 	if err != nil {
 		var zero time.Time
 		return zero, err
@@ -419,13 +406,7 @@ func (x *StorageLock) reentryUnlock(ctx context.Context, e *events.Event, ownerI
 	}
 	lockInformation.LeaseExpireTime = expireTime
 
-	updateAction := events.NewAction(ActionStorageUpdateWithVersion)
-	err = x.storage.UpdateWithVersion(ctx, x.options.LockId, lastVersion, lockInformation.Version, lockInformation)
-	e.Fork().
-		AddAction(updateAction.End().SetErr(err).AddPayload("exceptedVersion", lastVersion).AddPayload("newVersion", lockInformation.Version)).
-		SetLockInformation(lockInformation).
-		Publish(ctx)
-
+	err = x.storageExecutor.UpdateWithVersion(ctx, e.Fork(), x.options.LockId, lastVersion, lockInformation.Version, lockInformation)
 	// 更新成功，直接返回，说明锁释放成功了
 	if err == nil {
 		e.AddActionByName(ActionUnlockSuccess).Publish(ctx)
@@ -458,13 +439,7 @@ func (x *StorageLock) unlockWithClean(ctx context.Context, e *events.Event, owne
 	e.AddActionByName("begin-unlockWithClean").SetLockInformation(lockInformation)
 
 	// 重入锁的次数已经被释放干净了，现在需要将其彻底删除
-	deleteAction := events.NewAction(ActionStorageDeleteWithVersion)
-	err := x.storage.DeleteWithVersion(ctx, x.options.LockId, lastVersion, lockInformation)
-	e.Fork().
-		AddAction(deleteAction.End().SetErr(err).AddPayload("exceptedVersion", lastVersion)).
-		SetLockInformation(lockInformation).
-		Publish(ctx)
-
+	err := x.storageExecutor.DeleteWithVersion(ctx, e.Fork(), x.options.LockId, lastVersion, lockInformation)
 	// 如果删除的时候遇到错误，则直接认为锁释放失败
 	if err != nil {
 
@@ -517,10 +492,7 @@ func (x *StorageLock) unlockWithClean(ctx context.Context, e *events.Event, owne
 // 获取之前的锁保存的信息
 func (x *StorageLock) getLockInformation(ctx context.Context, e *events.Event) (*storage.LockInformation, error) {
 
-	getAction := events.NewAction(ActionStorageGet)
-	lockInformationJsonString, err := x.storage.Get(ctx, x.options.LockId)
-	e.Fork().AddAction(getAction.End().SetErr(err).AddPayload("lockInformationJsonString", lockInformationJsonString)).Publish(ctx)
-
+	lockInformationJsonString, err := x.storageExecutor.Get(ctx, e, x.options.LockId)
 	if err != nil {
 		return nil, err
 	}

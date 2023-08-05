@@ -32,7 +32,3 @@ var (
 	ErrOwnerCanOnlyOne = errors.New("lock owner only one")
 )
 
-var (
-	// ErrTimeProviderUnavailable TimeProvider无法提供时间
-	ErrTimeProviderUnavailable = errors.New("time provider unavailable")
-)
