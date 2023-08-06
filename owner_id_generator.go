@@ -3,7 +3,7 @@ package storage_lock
 import (
 	"fmt"
 	goroutine_id "github.com/golang-infrastructure/go-goroutine-id"
-	"github.com/google/uuid"
+	"github.com/storage-lock/go-utils"
 	"net"
 	"os"
 	"strings"
@@ -32,7 +32,7 @@ func NewOwnerIdGenerator() *OwnerIdGenerator {
 func (x *OwnerIdGenerator) getDefaultOwnId() string {
 	// 这里为了可读性并没有将区分度最高的UUID放在前面，这是假设使用此分布式锁的各个竞争者的Hostname基本都不会相同
 	// 因为是同一台机器上使用分布式锁不是很有意义
-	return fmt.Sprintf("%s-%s-%s", x.defaultLockPrefix, goroutine_id.GetGoroutineIDAsString(), strings.ReplaceAll(uuid.New().String(), "-", ""))
+	return fmt.Sprintf("%s-%s-%s", x.defaultLockPrefix, goroutine_id.GetGoroutineIDAsString(), utils.RandomID())
 }
 
 // 获取当前机器的Hostname作为唯一ID的前缀

@@ -2,6 +2,12 @@ package storage_lock
 
 import "errors"
 
+// ErrLockIdEmpty 参数相关的参数检查
+var (
+	ErrLockIdEmpty      = errors.New("lock id can not empty")
+	ErrLeaseExpireAfter = errors.New("LeaseExpireAfter must > time.Second * 3 ")
+)
+
 var (
 
 	// ErrLockFailed 尝试加锁失败
@@ -31,4 +37,3 @@ var (
 	// ErrOwnerCanOnlyOne 锁的有拥有者只能有一个，这是尝试给锁指定了多个owner时会返回的错误
 	ErrOwnerCanOnlyOne = errors.New("lock owner only one")
 )
-

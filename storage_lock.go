@@ -3,58 +3,56 @@ package storage_lock
 import (
 	"context"
 	"errors"
-	variable_parameter "github.com/golang-infrastructure/go-variable-parameter"
 	"github.com/storage-lock/go-events"
 	"github.com/storage-lock/go-storage"
 	storage_events "github.com/storage-lock/go-storage-events"
-	"github.com/storage-lock/go-utils"
 	"math/rand"
 	"time"
 )
 
-// StorageLock 基于存储介质的锁模型实现，底层存储介质是可插拔的
+// StorageLock 基于存储介质的锁模型实现，底层存储介质Storage是可插拔的
 type StorageLock struct {
 
-	// 锁持久化存储到哪个存储介质上
+	// 锁持久化存储到哪个存储介质上，storage.Storage是个接口，用来把锁进行持久化存储，这个接口有很多种不同的实现
 	storage storage.Storage
-	// 调用storage方法的时候不会直接调用，而是通过一层带事件监听和recover包着的执行器来调用
+	// 调用storage方法的时候不会直接调用，而是通过一层带事件监听和recover包着的执行器来调用，这样我们可以实现对锁的可观测性
 	storageExecutor *storage_events.WithEventSafeExecutor
 
 	// 锁的一些选项，可以高度定制化锁的行为
 	options *StorageLockOptions
 
-	// 负责为锁租约续期的协程，每个锁在被持有期间都会存在一个续租协程
+	// 负责为锁租约续期的协程，每个锁在被持有期间都会存在一个续租协程，当锁被释放的时候这个租约协程会被停止掉
 	storageLockWatchDog *LeaseRefreshGoroutine
 
 	// 做一些ID自动生成的工作
 	ownerIdGenerator *OwnerIdGenerator
 }
 
+// LockIdPrefix 自动生成的锁的ID的前缀，但是不建议使用自动生成的锁ID
 const LockIdPrefix = "storage-lock-id-"
 
-// NewStorageLock 创建一个基于存储介质的锁
+// NewStorageLock 使用锁的ID创建锁
+func NewStorageLock(storage storage.Storage, lockId string) (*StorageLock, error) {
+	options := NewStorageLockOptionsWithLockId(lockId)
+	return NewStorageLockWithOptions(storage, options)
+}
+
+// NewStorageLockWithOptions 创建一个基于存储介质的锁
 // storage: 锁持久化的存储介质，不同的介质有不同的实现，比如基于Mysql、基于MongoDB
 // options: 创建和维护锁时的相关配置项
-func NewStorageLock(storage storage.Storage, options ...*StorageLockOptions) *StorageLock {
+func NewStorageLockWithOptions(storage storage.Storage, options *StorageLockOptions) (*StorageLock, error) {
 
-	// 如果没有设置锁的参数的话则使用默认选项
-	option := variable_parameter.TakeFirstParamOrDefaultFunc[*StorageLockOptions](options, func() *StorageLockOptions {
-		return NewStorageLockOptions()
-	})
-
-	// 触发创建锁的事件
-	e := events.NewEvent(option.LockId).SetType(events.EventTypeCreateLock).SetStorageName(storage.GetName()).SetListeners(option.EventListeners)
-
-	// 如果没有设置锁的ID的话，则为其生成一个随机的默认的ID，但是通常情况下不是最佳实践，应该避免这种用法
-	if option.LockId == "" {
-		option.LockId = utils.RandomID(LockIdPrefix)
-		e.SetLockId(option.LockId).AddActionByName("random-lock-id")
+	// 参数检查
+	if err := checkStorageLockOptions(options); err != nil {
+		return nil, err
 	}
 
+	// 触发创建锁的事件
+	e := events.NewEvent(options.LockId).SetType(events.EventTypeCreateLock).SetStorageName(storage.GetName()).SetListeners(options.EventListeners)
 	lock := &StorageLock{
 		storage:          storage,
 		storageExecutor:  storage_events.NewWithEventSafeExecutor(storage),
-		options:          option,
+		options:          options,
 		ownerIdGenerator: NewOwnerIdGenerator(),
 	}
 
@@ -63,12 +61,14 @@ func NewStorageLock(storage storage.Storage, options ...*StorageLockOptions) *St
 
 	e.Publish(context.Background())
 
-	return lock
+	return lock, nil
 }
 
 // Lock 尝试获取锁
-// ctx: 用来控制超时，如果想永远不超时则传入context.Background，此时不获取到锁永不罢休，返回也永远为nil
-// ownerId: 是谁在尝试获取锁，如果不指定的话会为当前协程生成一个默认的ownerId
+// @params:
+//
+//	ctx: 用来控制超时，如果想永远不超时则传入context.Background()，此时不获取到锁永不罢休，返回也永远为nil
+//	ownerId: 是谁在尝试获取锁，如果不指定的话会为当前协程生成一个默认的ownerId
 func (x *StorageLock) Lock(ctx context.Context, ownerId ...string) error {
 
 	// 触发一个获取锁的事件
@@ -396,7 +396,7 @@ func (x *StorageLock) unlockWithRetry(ctx context.Context, e *events.Event, owne
 // 可重入锁的层级减一，但是并没有彻底释放，更新数据库中的锁的信息
 func (x *StorageLock) reentryUnlock(ctx context.Context, e *events.Event, ownerId string, lockInformation *storage.LockInformation, lastVersion storage.Version) error {
 
-	e.AddActionByName("begin-reentryUnlock").SetLockInformation(lockInformation)
+	e.AddActionByName("begin-reentryUnlock").SetLockInformation(lockInformation).SetOwnerId(ownerId)
 
 	// 更新锁的过期时间
 	expireTime, err := x.getLeaseExpireTime(ctx, e)
@@ -436,7 +436,7 @@ func (x *StorageLock) reentryUnlock(ctx context.Context, e *events.Event, ownerI
 // 锁被彻底释放干净了，需要将其从Storage中清除
 func (x *StorageLock) unlockWithClean(ctx context.Context, e *events.Event, ownerId string, lockInformation *storage.LockInformation, lastVersion storage.Version) error {
 
-	e.AddActionByName("begin-unlockWithClean").SetLockInformation(lockInformation)
+	e.AddActionByName("begin-unlockWithClean").SetLockInformation(lockInformation).SetOwnerId(ownerId)
 
 	// 重入锁的次数已经被释放干净了，现在需要将其彻底删除
 	err := x.storageExecutor.DeleteWithVersion(ctx, e.Fork(), x.options.LockId, lastVersion, lockInformation)
@@ -466,28 +466,13 @@ func (x *StorageLock) unlockWithClean(ctx context.Context, e *events.Event, owne
 		}
 	}
 
-	// 执行到这里表示已经删除成功了，则将租约续期的协程停掉
+	// 执行到这里表示已经删除成功了，然后将租约续期的协程也停掉，下次再获取到锁的时候再启动
 	e.Fork().AddActionByName(ActionWatchDogStop).SetWatchDogId(x.storageLockWatchDog.GetID()).Publish(ctx)
 	x.storageLockWatchDog.Stop()
 
 	e.AddActionByName(ActionUnlockSuccess).Publish(ctx)
 	return nil
 }
-
-//// UnLockUntilRelease 一直unlock直到释放掉锁，可能的场景是可重入锁重启之后清除之前可能存在的锁状态
-//func (x *StorageLock) UnLockUntilRelease(ctx context.Context, ownerId ...string) error {
-//	// TODO 递归可能会有溢出的风险，修改为迭代实现
-//	err := x.UnLock(ctx, ownerId...)
-//	if err != nil {
-//		if errors.Is(err, ErrLockNotFound) {
-//			return nil
-//		} else {
-//			return err
-//		}
-//	} else {
-//		return x.UnLockUntilRelease(ctx, ownerId...)
-//	}
-//}
 
 // 获取之前的锁保存的信息
 func (x *StorageLock) getLockInformation(ctx context.Context, e *events.Event) (*storage.LockInformation, error) {

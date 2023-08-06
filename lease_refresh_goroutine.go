@@ -28,6 +28,7 @@ type LeaseRefreshGoroutine struct {
 	ownerId string
 }
 
+// WatchDogIDPrefix 看门狗协程分配的ID
 const WatchDogIDPrefix = "storage-lock-watch-dog-"
 
 // NewStorageLockWatchDog 创建一只看门狗
@@ -101,7 +102,7 @@ func (x *LeaseRefreshGoroutine) Start() {
 		}
 
 		// 给一个退出信号
-		x.e.AddActionByName("watch-dog-by-name").Publish(context.Background())
+		x.e.AddActionByName("watch-dog-goroutine-exit").Publish(context.Background())
 
 	}()
 }
@@ -119,7 +120,7 @@ func (x *LeaseRefreshGoroutine) refreshLeaseExpiredTime(ctx context.Context) err
 	information, err := x.storageLock.getLockInformation(ctx, x.e)
 	if err != nil {
 
-		// 如果是锁已经不存在了，则先将续租协程停掉，以免在短时间内进行大量获取释放操作时挤压了太多无用的续租协程过慢的退出
+		// 如果是锁已经不存在了，则先将续租协程停掉，以免在短时间内进行大量获取释放操作时积压了太多无用的续租协程过慢的退出
 		if errors.Is(err, ErrLockNotFound) {
 			e.AddAction(events.NewAction(ActionLockNotFoundError).SetErr(err))
 			x.Stop()
@@ -132,7 +133,7 @@ func (x *LeaseRefreshGoroutine) refreshLeaseExpiredTime(ctx context.Context) err
 		return err
 	}
 
-	// 锁已经不是自己持有了，则直接退出，每个续租协程都是很忠贞的只为一个owner续租
+	// 锁已经不是自己持有了，则直接退出，每个续租协程都是很忠贞的只为一个owner续租，并不会进行协程复用
 	if information.OwnerId != x.ownerId {
 		e.AddAction(events.NewAction(ActionNotLockOwner).AddPayload("lockInformation", information))
 		x.Stop()
@@ -153,5 +154,6 @@ func (x *LeaseRefreshGoroutine) refreshLeaseExpiredTime(ctx context.Context) err
 
 	err = x.storageLock.storageExecutor.UpdateWithVersion(ctx, e.Fork(), x.storageLock.options.LockId, lastVersion, information.Version, information)
 
+	e.SetErr(err).Publish(ctx)
 	return err
 }
