@@ -264,7 +264,7 @@ func (x *StorageLock) lockNotExists(ctx context.Context, e *events.Event, ownerI
 	}
 	e.SetLockInformation(lockInformation)
 
-	err = x.storageExecutor.InsertWithVersion(ctx, e.Fork(), x.options.LockId, lockInformation.Version, lockInformation)
+	err = x.storageExecutor.CreateWithVersion(ctx, e.Fork(), x.options.LockId, lockInformation.Version, lockInformation)
 	if err != nil {
 
 		e.AddAction(events.NewAction("InsertWithVersion-error").SetErr(err))

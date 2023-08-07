@@ -5,8 +5,8 @@ go 1.19
 require (
 	github.com/golang-infrastructure/go-goroutine-id v0.0.0-20230331174358-98b48a64077b
 	github.com/storage-lock/go-events v0.0.1
-	github.com/storage-lock/go-storage v0.0.1
-	github.com/storage-lock/go-storage-events v0.0.1
+	github.com/storage-lock/go-storage v0.0.2
+	github.com/storage-lock/go-storage-events v0.0.2
 	github.com/storage-lock/go-utils v0.0.2
 	github.com/stretchr/testify v1.8.4
 )
