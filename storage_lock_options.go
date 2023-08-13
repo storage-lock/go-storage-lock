@@ -36,6 +36,16 @@ func checkStorageLockOptions(options *StorageLockOptions) error {
 		return ErrLeaseExpireAfter
 	}
 
+	// 刷新间隔必须小于租约有效时间，不然租约都过期了再刷新还有个毛用啊
+	if options.LeaseRefreshInterval >= options.LeaseExpireAfter {
+		return ErrLeaseRefreshInterval
+	}
+
+	// 如果没有设置看门狗factory的话，则为其设置上默认的
+	if options.WatchDogFactory == nil {
+		options.WatchDogFactory = NewWatchDogFactoryCommonsImpl()
+	}
+
 	return nil
 }
 
@@ -66,6 +76,12 @@ type StorageLockOptions struct {
 
 	// 用于监听观测锁使用过程中的各种事件，如果需要的话自行设置
 	EventListeners []events.Listener
+
+	// 用于创建看门狗
+	WatchDogFactory WatchDogFactory
+
+	// 版本未命中时的重试间隔
+	VersionMissRetryInterval time.Duration
 }
 
 // NewStorageLockOptions 使用默认值创建锁的配置项
