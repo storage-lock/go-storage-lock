@@ -4,14 +4,18 @@ import "errors"
 
 // ErrLockIdEmpty 参数相关的参数检查
 var (
-	ErrLockIdEmpty      = errors.New("lock id can not empty")
-	ErrLeaseExpireAfter = errors.New("LeaseExpireAfter must > time.Second * 3 ")
+	ErrLockIdEmpty          = errors.New("lock id can not empty")
+	ErrLeaseExpireAfter     = errors.New("LeaseExpireAfter must > time.Second * 3 ")
+	ErrLeaseRefreshInterval = errors.New("LeaseRefreshInterval must < ErrLeaseExpireAfter ")
 )
 
 var (
 
 	// ErrLockFailed 尝试加锁失败
 	ErrLockFailed = errors.New("lock failed")
+
+	// ErrLockBusy 锁在被其它人持有着
+	ErrLockBusy = errors.New("lock busy")
 
 	// ErrLockAlreadyExists 锁已经存在，无法继续进行给定操作
 	ErrLockAlreadyExists = errors.New("lock already exists")
