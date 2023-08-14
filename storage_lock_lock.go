@@ -297,7 +297,7 @@ func (x *StorageLock) lockNotExists(ctx context.Context, e *events.Event, lockId
 	}
 
 	// 为自己创建一只新的看门狗
-	x.storageLockWatchDog, err = x.options.WatchDogFactory.New(ctx, e.Fork(), x, ownerId)
+	x.storageLockWatchDog, err = x.options.WatchDogFactory.NewWatchDog(ctx, e.Fork(), x, ownerId)
 	if err != nil {
 		// 看门狗创建失败，尝试释放掉锁
 		x.lockRollback(ctx, e.Fork(), lockId, ownerId, lockInformation)

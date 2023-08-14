@@ -21,6 +21,6 @@ func (x *WatchDogFactoryCommonsImpl) Name() string {
 	return WatchDogFactoryCommonsImplName
 }
 
-func (x *WatchDogFactoryCommonsImpl) New(ctx context.Context, e *events.Event, lock *StorageLock, ownerId string) (WatchDog, error) {
+func (x *WatchDogFactoryCommonsImpl) NewWatchDog(ctx context.Context, e *events.Event, lock *StorageLock, ownerId string) (WatchDog, error) {
 	return NewWatchDogCommonsImpl(ctx, e, lock, ownerId), nil
 }
