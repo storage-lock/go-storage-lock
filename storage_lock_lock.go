@@ -30,6 +30,7 @@ func (x *StorageLock) Lock(ctx context.Context, ownerId string) error {
 
 	// 记录操作时版本miss的次数
 	versionMissCount := 0
+	lockBusyCount := 0
 
 	// 在方法退出的时候发送事件通知
 	defer func() {
@@ -43,18 +44,24 @@ func (x *StorageLock) Lock(ctx context.Context, ownerId string) error {
 		err := x.tryLock(ctx, e.Fork(), lockId, ownerId)
 		if err == nil {
 			// 获取锁成功，退出
-			e.Fork().AddAction(events.NewAction(ActionLockSuccess).AddPayload(PayloadVersionMissCount, versionMissCount)).Publish(ctx)
+			e.Fork().AddAction(events.NewAction(ActionLockSuccess).AddPayload(PayloadVersionMissCount, versionMissCount).AddPayload(PayloadLockBusyCount, lockBusyCount)).Publish(ctx)
 			return nil
 		}
 
-		// 只有在版本miss的情况下才会重试
-		if !errors.Is(err, ErrVersionMiss) {
-			e.Fork().AddAction(events.NewAction(ActionLockError).SetErr(err).AddPayload(PayloadVersionMissCount, versionMissCount)).Publish(ctx)
+		// 只有在版本miss的情况下或者锁被其它人持有者的情况才会等待重试
+		// 锁已经存在的错误被认为是版本miss的一种特殊情况
+		if errors.Is(err, ErrVersionMiss) || errors.Is(err, ErrLockAlreadyExists) {
+			// 尝试获取锁的时候版本miss了，触发一个获取锁版本miss的事件让外部能够感知得到
+			versionMissCount++
+			e.Fork().AddAction(events.NewAction(ActionLockVersionMiss).AddPayload(PayloadVersionMissCount, versionMissCount).AddPayload(PayloadLockBusyCount, lockBusyCount)).Publish(ctx)
+		} else if errors.Is(err, ErrLockBusy) {
+			// 锁被其它人持有着，勇敢牛牛，不怕困难，稍微一等，继续重试
+			lockBusyCount++
+			e.Fork().AddAction(events.NewAction(ActionLockBusy).AddPayload(PayloadVersionMissCount, versionMissCount).AddPayload(PayloadLockBusyCount, lockBusyCount)).Publish(ctx)
+		} else {
+			e.Fork().AddAction(events.NewAction(ActionLockError).SetErr(err).AddPayload(PayloadVersionMissCount, versionMissCount).AddPayload(PayloadLockBusyCount, lockBusyCount)).Publish(ctx)
 			return err
 		}
-		// 尝试获取锁的时候版本miss了，触发一个获取锁版本miss的事件让外部能够感知得到
-		versionMissCount++
-		e.Fork().AddAction(events.NewAction(ActionLockVersionMiss).AddPayload(PayloadVersionMissCount, versionMissCount)).Publish(ctx)
 
 		// 然后休眠一下再开始重新抢占锁
 		sleepDuration := x.options.VersionMissRetryInterval + x.retryIntervalRandomBase()
@@ -65,11 +72,11 @@ func (x *StorageLock) Lock(ctx context.Context, ownerId string) error {
 		select {
 		case <-ctx.Done():
 			// 没有时间了，算球没获取成功
-			e.Fork().AddAction(events.NewAction(ActionTimeout).AddPayload(PayloadVersionMissCount, versionMissCount)).Publish(ctx)
+			e.Fork().AddAction(events.NewAction(ActionTimeout).AddPayload(PayloadVersionMissCount, versionMissCount).AddPayload(PayloadLockBusyCount, lockBusyCount)).Publish(ctx)
 			return err
 		default:
 			// 还有时间，可以尝试重新获取
-			e.Fork().AddAction(events.NewAction(ActionSleepRetry).AddPayload(PayloadVersionMissCount, versionMissCount)).Publish(ctx)
+			e.Fork().AddAction(events.NewAction(ActionSleepRetry).AddPayload(PayloadVersionMissCount, versionMissCount).AddPayload(PayloadLockBusyCount, lockBusyCount)).Publish(ctx)
 			continue
 		}
 	}
