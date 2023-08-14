@@ -59,6 +59,7 @@ func (x *StorageLock) Lock(ctx context.Context, ownerId string) error {
 			lockBusyCount++
 			e.Fork().AddAction(events.NewAction(ActionLockBusy).AddPayload(PayloadVersionMissCount, versionMissCount).AddPayload(PayloadLockBusyCount, lockBusyCount)).Publish(ctx)
 		} else {
+			// 其它类型的错误就不再管了，认为是获取锁失败
 			e.Fork().AddAction(events.NewAction(ActionLockError).SetErr(err).AddPayload(PayloadVersionMissCount, versionMissCount).AddPayload(PayloadLockBusyCount, lockBusyCount)).Publish(ctx)
 			return err
 		}
@@ -323,7 +324,8 @@ func (x *StorageLock) lockNotExists(ctx context.Context, e *events.Event, lockId
 
 // 获取到锁了，但是因为种种原因没办法真的获取成功，于是就尝试对齐进行回滚
 func (x *StorageLock) lockRollback(ctx context.Context, e *events.Event, lockId, ownerId string, lockInformation *storage.LockInformation) {
-	// 尽力而为释放锁，如果释放不掉也只能慢慢等它过期了
+
+	// 尽力而为回滚锁，如果释放不掉也只能慢慢等它过期了
 
 	e.AddAction(events.NewAction(ActionLockRollback)).Publish(ctx)
 

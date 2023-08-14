@@ -51,7 +51,7 @@ func (x *StorageLock) UnLock(ctx context.Context, ownerId string) error {
 		case <-ctx.Done():
 			e.Fork().AddAction(events.NewAction(ActionTimeout).AddPayload(PayloadVersionMissCount, versionMissCount)).Publish(ctx)
 			return err
-		case <-time.After(time.Microsecond):
+		default:
 			e.Fork().AddAction(events.NewAction(ActionSleepRetry).AddPayload(PayloadVersionMissCount, versionMissCount)).Publish(ctx)
 			continue
 		}
@@ -76,7 +76,7 @@ func (x *StorageLock) tryUnlock(ctx context.Context, e *events.Event, lockId, ow
 
 	// 如果读取到的锁的信息为空，则说明锁不存在，一个不存在的锁自然也没有继续的必要
 	if lockInformation == nil {
-		e.Fork().AddActionByName("lock-information-not-exists").Publish(ctx)
+		e.Fork().AddActionByName(ActionLockNotExists).Publish(ctx)
 		return ErrLockNotFound
 	}
 
@@ -93,11 +93,9 @@ func (x *StorageLock) tryUnlock(ctx context.Context, e *events.Event, lockId, ow
 
 	// 如果释放一次之后发现还没有释放干净，说明是重入锁，并且加锁次数还没有为0，则尝试更新锁的信息
 	if lockInformation.LockCount > 0 {
-		e.Fork().AddActionByName(ActionUnlockReentry).Publish(ctx)
 		return x.unlockReentry(ctx, e.Fork(), lockId, ownerId, lockInformation, lastVersion)
 	} else {
 		// 如果经过这次操作之后锁的锁的锁定次数为0，说明应该彻底释放掉这个锁了，将其从Storage中清除
-		e.Fork().AddActionByName(ActionUnlockRelease).Publish(ctx)
 		return x.unlockRelease(ctx, e.Fork(), lockId, ownerId, lockInformation, lastVersion)
 	}
 }
@@ -125,17 +123,18 @@ func (x *StorageLock) unlockReentry(ctx context.Context, e *events.Event, lockId
 
 	err = x.storageExecutor.UpdateWithVersion(ctx, e.Fork(), lockId, lastVersion, lockInformation.Version, lockInformation)
 	// 更新成功，直接返回，说明锁释放成功了
-	if err == nil {
-		e.Fork().AddActionByName(ActionUnlockSuccess).Publish(ctx)
+	if err != nil {
+		if errors.Is(err, ErrVersionMiss) {
+			e.Fork().AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersionMiss).SetErr(err)).Publish(ctx)
+			return ErrVersionMiss
+		} else {
+			e.Fork().AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersionError).SetErr(err)).Publish(ctx)
+			return err
+		}
+	} else {
+		e.Fork().AddActionByName(storage_events.ActionStorageUpdateWithVersionSuccess).Publish(ctx)
 		return nil
 	}
-
-	if err != nil && !errors.Is(err, ErrVersionMiss) {
-		e.Fork().AddAction(events.NewAction(ActionUnlockError).SetErr(err)).Publish(ctx)
-		return err
-	}
-	e.Fork().AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersionSuccess)).Publish(ctx)
-	return nil
 }
 
 // 锁被彻底释放干净了，将其标记为已经释放，以方便下一个到来的人能够重新拿到它
@@ -160,10 +159,11 @@ func (x *StorageLock) unlockRelease(ctx context.Context, e *events.Event, lockId
 	if err != nil {
 		if errors.Is(err, ErrVersionMiss) {
 			e.Fork().AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersionMiss).SetErr(err)).Publish(ctx)
+			return ErrVersionMiss
 		} else {
 			e.Fork().AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersionError).SetErr(err)).Publish(ctx)
+			return err
 		}
-		return err
 	}
 	e.Fork().AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersionSuccess)).Publish(ctx)
 
@@ -181,5 +181,6 @@ func (x *StorageLock) unlockRelease(ctx context.Context, e *events.Event, lockId
 		stopLastWatchDogEvent.Publish(ctx)
 	}
 
+	// 无论看门狗进程是否停止成功，这里都返回nil，看门狗接口的实现者负责保证异常情况下没有协程残留
 	return nil
 }
