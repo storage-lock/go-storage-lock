@@ -28,6 +28,6 @@ func (x *WatchDogFactoryFuncWrapper) Name() string {
 	return x.name
 }
 
-func (x *WatchDogFactoryFuncWrapper) New(ctx context.Context, e *events.Event, lock *StorageLock, ownerId string) (WatchDog, error) {
+func (x *WatchDogFactoryFuncWrapper) NewWatchDog(ctx context.Context, e *events.Event, lock *StorageLock, ownerId string) (WatchDog, error) {
 	return x.newFunc(ctx, e, lock, ownerId)
 }
