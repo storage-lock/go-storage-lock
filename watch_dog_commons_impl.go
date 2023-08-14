@@ -54,6 +54,7 @@ func NewWatchDogCommonsImpl(ctx context.Context, e *events.Event, lock *StorageL
 		isRunning:   atomic.Bool{},
 		storageLock: lock,
 		ownerId:     ownerId,
+		e:           e,
 	}
 }
 

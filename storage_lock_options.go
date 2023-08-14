@@ -18,9 +18,7 @@ var (
 	// 需要注意的是这个租约的刷新间隔不能超过 (DefaultLeaseExpireAfter - time.Second)
 	DefaultLeaseRefreshInterval = time.Second * 30
 
-	// DefaultVersionMissRetryTimes 默认的版本乐观锁未命中时的重试次数，这里为了防止高并发或者网络不好等情况导致失败率过高就把值设置的稍微大了一些，
-	// 用户可以根据自己的实际情况调整重试次数
-	//DefaultVersionMissRetryTimes = 100
+	DefaultVersionMissRetryInterval = time.Microsecond * 100
 )
 
 // 检查参数配置是否正确
@@ -68,11 +66,6 @@ type StorageLockOptions struct {
 	// 租约刷新间隔，当获取锁成功时会有一个协程专门负责续约租约，这个参数就决定它每隔多久发起一次续约操作，这个用来保证不会在锁使用的期间突然过期
 	LeaseRefreshInterval time.Duration
 
-	// 这个放弃时机感觉以具体的时间长度更为合适
-	//// 乐观锁的版本未命中的时候的重试次数
-	// 当传入的值等于0的时候表示不进行重试
-	// 当传入的值小于0的时候表示无限重试不成功永远不结束
-	//VersionMissRetryTimes uint
 
 	// 用于监听观测锁使用过程中的各种事件，如果需要的话自行设置
 	EventListeners []events.Listener
@@ -87,9 +80,9 @@ type StorageLockOptions struct {
 // NewStorageLockOptions 使用默认值创建锁的配置项
 func NewStorageLockOptions() *StorageLockOptions {
 	return &StorageLockOptions{
-		LeaseExpireAfter:     DefaultLeaseExpireAfter,
-		LeaseRefreshInterval: DefaultLeaseRefreshInterval,
-		//VersionMissRetryTimes: DefaultVersionMissRetryTimes,
+		LeaseExpireAfter:         DefaultLeaseExpireAfter,
+		LeaseRefreshInterval:     DefaultLeaseRefreshInterval,
+		VersionMissRetryInterval: DefaultVersionMissRetryInterval,
 	}
 }
 
@@ -113,7 +106,22 @@ func (x *StorageLockOptions) SetLeaseRefreshInterval(leaseRefreshInterval time.D
 	return x
 }
 
-//func (x *StorageLockOptions) WithVersionMissRetryTimes(versionMissRetryTimes uint) *StorageLockOptions {
-//	x.VersionMissRetryTimes = versionMissRetryTimes
-//	return x
-//}
+func (x *StorageLockOptions) SetEventListeners(eventListeners []events.Listener) *StorageLockOptions {
+	x.EventListeners = eventListeners
+	return x
+}
+
+func (x *StorageLockOptions) AddEventListeners(eventListener events.Listener) *StorageLockOptions {
+	x.EventListeners = append(x.EventListeners, eventListener)
+	return x
+}
+
+func (x *StorageLockOptions) SetWatchDogFactory(watchDogFactory WatchDogFactory) *StorageLockOptions {
+	x.WatchDogFactory = watchDogFactory
+	return x
+}
+
+func (x *StorageLockOptions) SetVersionMissRetryInterval(versionMissRetryInterval time.Duration) *StorageLockOptions {
+	x.VersionMissRetryInterval = versionMissRetryInterval
+	return x
+}

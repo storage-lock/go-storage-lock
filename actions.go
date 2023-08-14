@@ -72,5 +72,6 @@ const (
 const (
 	PayloadLastVersion      = "lastVersion"
 	PayloadVersionMissCount = "versionMissCount"
+	PayloadLockBusyCount = "lockBusyCount"
 	PayloadSleep            = "sleep"
 )
