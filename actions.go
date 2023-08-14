@@ -1,6 +1,6 @@
 package storage_lock
 
-// 通用
+// 通用的事件
 const (
 	ActionLockNotFoundError       = "lock-not-found-error"
 	ActionNotLockOwner            = "not-lock-owner"
@@ -11,7 +11,7 @@ const (
 	ActionGetLeaseExpireTimeError = "getLeaseExpireTime-error"
 )
 
-// 获取锁
+// 获取锁相关的事件
 const (
 	ActionLockBegin   = "StorageLock.Lock.Begin"
 	ActionLockFinish  = "StorageLock.Lock.Finish"
@@ -34,7 +34,7 @@ const (
 	ActionLockRollbackError   = "StorageLock.Lock.Rollback.Error"
 )
 
-// 释放锁
+// 释放锁相关的事件
 const (
 	ActionUnlock        = "StorageLock.Unlock"
 	ActionUnlockFinish  = "StorageLock.Unlock.Finish"
@@ -52,6 +52,7 @@ const (
 	ActionWatchDogRefresh        = "WatchDog.Refresh"
 	ActionWatchDogRefreshBegin   = "WatchDog.Refresh.Begin"
 	ActionWatchDogRefreshSuccess = "WatchDog.Refresh.Success"
+	ActionWatchDogRefreshError   = "WatchDog.Refresh.Error"
 
 	ActionWatchDogCreate        = "WatchDog.Create"
 	ActionWatchDogCreateSuccess = "WatchDog.Create.Success"
@@ -65,13 +66,18 @@ const (
 	ActionWatchDogStopSuccess = "WatchDog.Stop.success"
 	ActionWatchDogStopError   = "WatchDog.Stop.error"
 
-	ActionWatchDogExit               = "WatchDog.Exit"
-	ActionWatchDogExitByTooManyError = "WatchDog.Exit.TooManyError"
+	ActionWatchDogExit = "WatchDog.Exit"
+	//ActionWatchDogExitByTooManyError = "WatchDog.Exit.TooManyError"
+
+	ActionWatchDogSetEvent = "WatchDog.SetEvent"
 )
 
+// Payload的名字
 const (
-	PayloadLastVersion      = "lastVersion"
-	PayloadVersionMissCount = "versionMissCount"
-	PayloadLockBusyCount = "lockBusyCount"
-	PayloadSleep            = "sleep"
+	PayloadLastVersion         = "lastVersion"
+	PayloadVersionMissCount    = "versionMissCount"
+	PayloadLockBusyCount       = "lockBusyCount"
+	PayloadSleep               = "sleep"
+	PayloadRefreshSuccessCount = "refreshSuccessCount"
+	PayloadContinueErrorCount  = "continueErrorCount"
 )
