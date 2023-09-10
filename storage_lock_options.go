@@ -18,7 +18,8 @@ var (
 	// 需要注意的是这个租约的刷新间隔不能超过 (DefaultLeaseExpireAfter - time.Second)
 	DefaultLeaseRefreshInterval = time.Second * 30
 
-	DefaultVersionMissRetryInterval = time.Microsecond * 100
+	// DefaultVersionMissRetryInterval 版本miss时间隔多久再重试
+	DefaultVersionMissRetryInterval = time.Second
 )
 
 // 检查参数配置是否正确
@@ -65,7 +66,6 @@ type StorageLockOptions struct {
 
 	// 租约刷新间隔，当获取锁成功时会有一个协程专门负责续约租约，这个参数就决定它每隔多久发起一次续约操作，这个用来保证不会在锁使用的期间突然过期
 	LeaseRefreshInterval time.Duration
-
 
 	// 用于监听观测锁使用过程中的各种事件，如果需要的话自行设置
 	EventListeners []events.Listener
