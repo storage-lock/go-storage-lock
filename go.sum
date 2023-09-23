@@ -3,6 +3,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/golang-infrastructure/go-goroutine-id v0.0.0-20230331174358-98b48a64077b h1:kt3zNiijgkfPm47YaL4MaQJkw0T7ukEEttnCQMOcWxo=
 github.com/golang-infrastructure/go-goroutine-id v0.0.0-20230331174358-98b48a64077b/go.mod h1:1L+eneS0HXUlZP0tmESGhlmpJ3hl063JGz6UQaJCmY0=
+github.com/golang-infrastructure/go-goroutine-id v0.0.0-20230917075314-f1af231c0b06 h1:A28MrYe3pSClGhMVyTQF6wd3h3Tt/U31nddoK60+HZQ=
+github.com/golang-infrastructure/go-goroutine-id v0.0.0-20230917075314-f1af231c0b06/go.mod h1:1L+eneS0HXUlZP0tmESGhlmpJ3hl063JGz6UQaJCmY0=
 github.com/golang-infrastructure/go-iterator v0.0.0-20230524171120-56988a9b127c h1:h4321AFRVv5rTKcColUjE5pa+Y1exG1e6aEXn43L/Eg=
 github.com/golang-infrastructure/go-iterator v0.0.0-20230524171120-56988a9b127c/go.mod h1:Guf14ZZ7f7qiE0YpZbUkICcm7LWc3nrn3/gDObT//WI=
 github.com/golang-infrastructure/go-pointer v0.0.5 h1:wzZ/XnXKzD3DWECTnUpUh+xAlGSWqfn/pQyusPNsqrQ=
@@ -11,6 +13,8 @@ github.com/golang-infrastructure/go-reflect-utils v0.0.0-20221130143747-965ef2eb
 github.com/golang-infrastructure/go-reflect-utils v0.0.0-20221130143747-965ef2eb09c3/go.mod h1:zqXYxqOBa1mL2ilBK6PuH/Wb/Iego7en6XhiKWdZQHI=
 github.com/google/uuid v1.3.0 h1:t6JiXgmwXMjEs8VusXIJk2BXHsn+wx8BZdTaoZ5fu7I=
 github.com/google/uuid v1.3.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+github.com/google/uuid v1.3.1 h1:KjJaJ9iWZ3jOFZIf1Lqf4laDRCasjl0BCmnEGxkdLb4=
+github.com/google/uuid v1.3.1/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
 github.com/kr/pretty v0.2.1/go.mod h1:ipq/a2n7PKx3OHsz4KJII5eveXtPO4qwEXGdVfWzfnI=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
 github.com/kr/pretty v0.3.1/go.mod h1:hoEshYVHaxMs3cyo3Yncou5ZscifuDolrwPKZanG3xk=

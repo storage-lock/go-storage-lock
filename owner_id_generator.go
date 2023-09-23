@@ -35,7 +35,7 @@ func NewOwnerIdGenerator() *OwnerIdGenerator {
 func (x *OwnerIdGenerator) GenOwnerId() string {
 	// 这里为了可读性并没有将区分度最高的UUID放在前面，这是假设使用此分布式锁的各个竞争者的Hostname基本都不会相同
 	// 因为是同一台机器上使用分布式锁不是很有意义
-	return fmt.Sprintf("%s-%s-%s", x.defaultLockPrefix, goroutine_id.GetGoroutineIDAsString(), utils.RandomID())
+	return fmt.Sprintf("%s-%s-%s", x.defaultLockPrefix, goroutine_id.GetGoroutineIdAsString(), utils.RandomID())
 }
 
 // 获取当前机器的Hostname作为唯一ID的前缀
