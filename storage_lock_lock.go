@@ -287,8 +287,9 @@ func (x *StorageLock) lockNotExists(ctx context.Context, e *events.Event, lockId
 	// 插入成功，看下如果之前有续租协程的话就停掉，这一步是为了防止之前有资源未清理干净
 	if x.storageLockWatchDog != nil {
 		stopLastWatchDogEvent := e.Fork().AddActionByName(ActionWatchDogStop).SetWatchDogId(x.storageLockWatchDog.GetID())
-		x.storageLockWatchDog = nil
 		err := x.storageLockWatchDog.Stop(ctx)
+		// 把指针清空，防止后续被重复设置为nil
+		x.storageLockWatchDog = nil
 		if err != nil {
 			stopLastWatchDogEvent.AddAction(events.NewAction(ActionWatchDogStopError).SetErr(err))
 		} else {

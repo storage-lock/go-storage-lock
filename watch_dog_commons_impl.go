@@ -54,6 +54,7 @@ func NewWatchDogCommonsImpl(ctx context.Context, e *events.Event, lock *StorageL
 
 	return &WatchDogCommonsImpl{
 		id:          id,
+		lockId:      lockId,
 		isRunning:   atomic.Bool{},
 		storageLock: lock,
 		ownerId:     ownerId,
@@ -85,8 +86,8 @@ func (x *WatchDogCommonsImpl) Start(ctx context.Context) error {
 		// 统计连续多少次发生错误了
 		continueErrorCount := 0
 
-		// 退出的时候给一个信号
-		go func() {
+		// 退出的时候给一个信号，使用 defer 确保在 goroutine 退出时才触发，且能捕获到最终的计数值
+		defer func() {
 			exitAction := events.NewAction(ActionWatchDogExit).
 				AddPayload(PayloadRefreshSuccessCount, refreshSuccessCount).
 				AddPayload(PayloadContinueErrorCount, continueErrorCount)
