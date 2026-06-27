@@ -12,7 +12,7 @@ import (
 // StorageLock中与释放锁相关的逻辑拆分到这个文件中，以防止逻辑都放在一个文件中内容太长不好管理
 
 // UnLock 尝试释放锁，如果释放不成功的话则会返回error
-// ownerId: 是谁在尝试释放锁，操作者应该有唯一的标识
+// ownerId: 是谁在尝试释放锁，必须与 Lock 时使用的 ownerId 相同，否则会返回 ErrLockNotBelongYou
 func (x *StorageLock) UnLock(ctx context.Context, ownerId string) error {
 
 	lockId := x.options.LockId
@@ -137,13 +137,13 @@ func (x *StorageLock) unlockReentry(ctx context.Context, e *events.Event, lockId
 	}
 }
 
-// 锁被彻底释放干净了，将其标记为已经释放，以方便下一个到来的人能够重新拿到它
+// 锁被彻底释放干净了，将其从Storage中删除，这样下一个获取锁的人就能走 CreateWithVersion 路径
 // ctx: 可以用作一些超时控制之类的
 // e: 事件流推送
 // lockId: 解锁的是哪个锁
 // ownerId: 当前是谁在尝试释放锁
-// lockInformation: 注意这个参数传进来的时候已经被修改过了，所以这里只需要将其更新就可以了不用再操作版本号啥的
-// lastVersion: CAS时期望的锁的最新版本，如果不是的话会修改失败
+// lockInformation: 锁的信息，用于传递给 DeleteWithVersion 作为条件校验
+// lastVersion: CAS时期望的锁的最新版本，如果不是的话会删除失败
 func (x *StorageLock) unlockRelease(ctx context.Context, e *events.Event, lockId, ownerId string, lockInformation *storage.LockInformation, lastVersion storage.Version) error {
 
 	// 更新事件的上下文
@@ -155,31 +155,22 @@ func (x *StorageLock) unlockRelease(ctx context.Context, e *events.Event, lockId
 		AddPayload(storage_events.PayloadLockInformation, lockInformation)
 	e.AddAction(unlockReleaseAction).Publish(ctx)
 
-	err := x.storageExecutor.UpdateWithVersion(ctx, e, lockId, lastVersion, lockInformation.Version, lockInformation)
+	// 使用 DeleteWithVersion 真正从存储中删除锁记录，而不是仅仅把 LockCount 设为 0
+	// 这样下一个获取锁的人会走 lockNotExists → CreateWithVersion 路径，语义清晰且不会造成存储泄漏
+	err := x.storageExecutor.DeleteWithVersion(ctx, e, lockId, lastVersion, lockInformation)
 	if err != nil {
 		if errors.Is(err, ErrVersionMiss) {
-			e.Fork().AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersionMiss).SetErr(err)).Publish(ctx)
+			e.Fork().AddAction(events.NewAction(storage_events.ActionStorageDeleteWithVersionMiss).SetErr(err)).Publish(ctx)
 			return ErrVersionMiss
 		} else {
-			e.Fork().AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersionError).SetErr(err)).Publish(ctx)
+			e.Fork().AddAction(events.NewAction(storage_events.ActionStorageDeleteWithVersionError).SetErr(err)).Publish(ctx)
 			return err
 		}
 	}
-	e.Fork().AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersionSuccess)).Publish(ctx)
+	e.Fork().AddAction(events.NewAction(storage_events.ActionStorageDeleteWithVersionSuccess)).Publish(ctx)
 
 	// 把看门狗协程也停止掉，不要再尝试续租了
-	if x.storageLockWatchDog != nil {
-		stopLastWatchDogEvent := e.Fork().SetLockInformation(lockInformation).AddActionByName(ActionWatchDogStop).SetWatchDogId(x.storageLockWatchDog.GetID())
-		err := x.storageLockWatchDog.Stop(ctx)
-		// 把指针清空，防止后续被重复设置为nil
-		x.storageLockWatchDog = nil
-		if err != nil {
-			stopLastWatchDogEvent.AddAction(events.NewAction(ActionWatchDogStopError).SetErr(err))
-		} else {
-			stopLastWatchDogEvent.AddAction(events.NewAction(ActionWatchDogStopSuccess))
-		}
-		stopLastWatchDogEvent.Publish(ctx)
-	}
+	x.stopWatchDog(ctx, e, lockInformation)
 
 	// 无论看门狗进程是否停止成功，这里都返回nil，看门狗接口的实现者负责保证异常情况下没有协程残留
 	return nil

@@ -13,7 +13,10 @@ import (
 // @params:
 //
 //	ctx: 用来控制超时，如果想永远不超时则传入context.Background()
-//	ownerId: 是谁在尝试获取锁，如果不指定的话会为当前协程生成一个默认的ownerId
+//	ownerId: 是谁在尝试获取锁，必须是全局唯一的标识。
+//	        ⚠️ 重要：Lock 和 UnLock 必须使用相同的 ownerId，否则无法释放锁！
+//	        可以使用 OwnerIdGenerator.GenOwnerId() 生成，但请注意每次调用返回不同的 ID，
+//	        因此需要先保存到变量中再使用。
 //
 // @returns:
 //
@@ -117,11 +120,6 @@ func (x *StorageLock) lockExists(ctx context.Context, e *events.Event, lockId, o
 		return err
 	}
 
-	// 看下锁是不是一个被释放的锁，如果是的话则尝试开始抢占锁
-	if lockInformation.LockCount == 0 {
-		return x.lockReleased(ctx, e.Fork(), lockId, ownerId, storageTime, lockInformation)
-	}
-
 	// 看下锁是否已经过期了，如果已经过期了的话，则直接开始尝试抢占锁
 	if storageTime.After(lockInformation.LeaseExpireTime) {
 		return x.lockExpired(ctx, e.Fork(), lockId, ownerId, storageTime, lockInformation)
@@ -134,37 +132,6 @@ func (x *StorageLock) lockExists(ctx context.Context, e *events.Event, lockId, o
 		// 锁被其他人占用着，暂时不能尝试获取锁
 		e.Fork().AddAction(events.NewAction(ActionLockBusy).AddPayload(storage_events.PayloadLockInformation, lockInformation)).Publish(ctx)
 		return ErrLockBusy
-	}
-}
-
-// 尝试抢占一个已经被释放了的锁
-func (x *StorageLock) lockReleased(ctx context.Context, e *events.Event, lockId, ownerId string, storageTime time.Time, information *storage.LockInformation) error {
-
-	// 创建锁的信息，除了lockId其它的都跟之前不一样了
-	newLockInformation := &storage.LockInformation{
-		LockId:          lockId,
-		OwnerId:         ownerId,
-		Version:         information.Version + 1,
-		LockCount:       1,
-		LockBeginTime:   storageTime,
-		LeaseExpireTime: storageTime.Add(x.options.LeaseExpireAfter),
-	}
-	e.AddAction(events.NewAction(ActionLockReleased).AddPayload(storage_events.PayloadLockInformation, newLockInformation))
-
-	// 开始抢占锁
-	err := x.storageExecutor.UpdateWithVersion(ctx, e.Fork(), lockId, information.Version, newLockInformation.Version, newLockInformation)
-	if err != nil {
-		if errors.Is(err, ErrVersionMiss) {
-			e.Fork().AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersionMiss)).Publish(ctx)
-			return ErrVersionMiss
-		} else {
-			e.Fork().AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersionError).SetErr(err)).Publish(ctx)
-			return err
-		}
-	} else {
-		// 抢占成功，成功拿到了锁
-		e.Fork().AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersionSuccess)).Publish(ctx)
-		return nil
 	}
 }
 
@@ -285,35 +252,25 @@ func (x *StorageLock) lockNotExists(ctx context.Context, e *events.Event, lockId
 	e.Fork().AddAction(events.NewAction(storage_events.ActionStorageCreateWithVersionSuccess)).Publish(ctx)
 
 	// 插入成功，看下如果之前有续租协程的话就停掉，这一步是为了防止之前有资源未清理干净
-	if x.storageLockWatchDog != nil {
-		stopLastWatchDogEvent := e.Fork().AddActionByName(ActionWatchDogStop).SetWatchDogId(x.storageLockWatchDog.GetID())
-		err := x.storageLockWatchDog.Stop(ctx)
-		// 把指针清空，防止后续被重复设置为nil
-		x.storageLockWatchDog = nil
-		if err != nil {
-			stopLastWatchDogEvent.AddAction(events.NewAction(ActionWatchDogStopError).SetErr(err))
-		} else {
-			stopLastWatchDogEvent.AddAction(events.NewAction(ActionWatchDogStopSuccess))
-		}
-		stopLastWatchDogEvent.Publish(ctx)
-	}
+	x.stopWatchDog(ctx, e.Fork(), lockInformation)
 
 	// 为自己创建一只新的看门狗
-	x.storageLockWatchDog, err = x.options.WatchDogFactory.NewWatchDog(ctx, e.Fork(), x, ownerId)
+	watchDog, err := x.options.WatchDogFactory.NewWatchDog(ctx, e.Fork(), x, ownerId)
 	if err != nil {
 		// 看门狗创建失败，尝试释放掉锁
 		x.lockRollback(ctx, e.Fork(), lockId, ownerId, lockInformation)
-		x.storageLockWatchDog = nil
+		x.setWatchDog(nil)
 		e.Fork().AddAction(events.NewAction(ActionWatchDogCreateError).SetErr(err)).Publish(ctx)
 		return err
 	}
-	e.SetWatchDogId(x.storageLockWatchDog.GetID()).Fork().AddAction(events.NewAction(ActionWatchDogCreateSuccess)).Publish(ctx)
+	x.setWatchDog(watchDog)
+	e.SetWatchDogId(watchDog.GetID()).Fork().AddAction(events.NewAction(ActionWatchDogCreateSuccess)).Publish(ctx)
 
 	// 启动这只看门狗
-	err = x.storageLockWatchDog.Start(ctx)
+	err = watchDog.Start(ctx)
 	if err != nil {
-		x.storageLockWatchDog = nil
-		// 看门狗创建失败，尝试释放掉锁
+		x.setWatchDog(nil)
+		// 看门狗启动失败，尝试释放掉锁
 		x.lockRollback(ctx, e.Fork(), lockId, ownerId, lockInformation)
 		e.Fork().AddAction(events.NewAction(ActionWatchDogStartError).SetErr(err)).Publish(ctx)
 		return err
@@ -323,17 +280,15 @@ func (x *StorageLock) lockNotExists(ctx context.Context, e *events.Event, lockId
 	return nil
 }
 
-// 获取到锁了，但是因为种种原因没办法真的获取成功，于是就尝试对齐进行回滚
+// 获取到锁了，但是因为种种原因没办法真的获取成功，于是就尝试对其进行回滚
 func (x *StorageLock) lockRollback(ctx context.Context, e *events.Event, lockId, ownerId string, lockInformation *storage.LockInformation) {
 
 	// 尽力而为回滚锁，如果释放不掉也只能慢慢等它过期了
 
 	e.AddAction(events.NewAction(ActionLockRollback)).Publish(ctx)
 
-	lastVersion := lockInformation.Version
-	lockInformation.Version++
-	lockInformation.LockCount = 0
-	err := x.unlockRelease(ctx, e.Fork(), lockId, ownerId, lockInformation, lastVersion)
+	// 回滚时直接删除锁记录，因为锁刚创建还没有被其他人竞争
+	err := x.storageExecutor.DeleteWithVersion(ctx, e.Fork(), lockId, lockInformation.Version, lockInformation)
 	if err != nil {
 		e.Fork().AddAction(events.NewAction(ActionLockRollbackError).SetErr(err)).Publish(ctx)
 	} else {

@@ -6,6 +6,7 @@ import (
 	"github.com/storage-lock/go-events"
 	storage_events "github.com/storage-lock/go-storage-events"
 	"github.com/storage-lock/go-utils"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -29,6 +30,11 @@ type WatchDogCommonsImpl struct {
 
 	// 是为谁而续这个租约，即锁的持有者
 	ownerId string
+
+	// goroutine 退出信号：goroutine 退出时 close(done)，Stop 等待此信号
+	done chan struct{}
+	// 确保 done 只被 close 一次
+	doneOnce sync.Once
 }
 
 // WatchDogIDPrefix 看门狗协程分配的ID
@@ -78,8 +84,13 @@ func (x *WatchDogCommonsImpl) Start(ctx context.Context) error {
 	// 发送开始的信号
 	x.e.Fork().AddActionByName(ActionWatchDogStart).Publish(ctx)
 
+	// 初始化 done channel，用于 Stop 等待 goroutine 退出
+	x.done = make(chan struct{})
 	x.isRunning.Store(true)
 	go func() {
+
+		// 确保 goroutine 退出时关闭 done channel，这样 Stop 就能收到信号
+		defer x.doneOnce.Do(func() { close(x.done) })
 
 		// 已经刷新成功多少次了
 		refreshSuccessCount := 0
@@ -128,27 +139,6 @@ func (x *WatchDogCommonsImpl) Start(ctx context.Context) error {
 					x.e.Fork().AddAction(notLockOwnerAction).Publish(context.Background())
 					return
 				}
-
-				// 2023-8-14 22:17:44 即使一直发生错误，也要眼含着泪花把工作进行下去，不能半途不干了，万一后面还有转机呢
-				//// 连续失败次数太多把自己关掉
-				//// TODO 2023-8-12 20:46:01 cutoff提取为参数，由外部决定
-				//if continueErrorCount > 10 {
-				//	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Minute*5)
-				//	err := x.Stop(ctx)
-				//	cancelFunc()
-				//	if err != nil {
-				//		x.e.Fork().AddAction(events.NewAction(ActionWatchDogStopError).SetErr(err)).Publish(ctx)
-				//	} else {
-				//		x.e.Fork().AddAction(events.NewAction(ActionWatchDogStopError).SetErr(err)).Publish(ctx)
-				//	}
-				//	x.e.AddAction(events.NewAction(ActionWatchDogExitByTooManyError).
-				//		AddPayload("continueErrorCount", continueErrorCount).
-				//		AddPayload("refreshSuccessCount", refreshSuccessCount))
-				//	break
-				//}
-				//x.e.Fork().
-				//	AddAction(events.NewAction("watch-dog-refreshLeaseExpiredTime-error").AddPayload("continueErrorCount", continueErrorCount).SetErr(err)).
-				//	Publish(context.Background())
 
 				// 租约刷新失败事件
 				refreshErrorAction := events.NewAction(ActionWatchDogRefreshError).
@@ -247,26 +237,40 @@ func (x *WatchDogCommonsImpl) refreshLeaseExpiredTime() error {
 		refreshEvent.AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersion + "-error").SetErr(err))
 	} else {
 		refreshEvent.AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersion + "-success"))
+
+		// 防御性检查：UpdateWithVersion 成功后，验证锁的 OwnerId 仍然是自己的
+		// 这是为了防止在 Get 和 UpdateWithVersion 之间的时间窗口内，锁被其他人抢占后又被我们错误续租
+		verifyInfo, verifyErr := x.storageLock.getLockInformation(ctx, x.e, x.lockId)
+		if verifyErr == nil && verifyInfo.OwnerId != x.ownerId {
+			// OwnerId 已经不是自己了，说明我们可能错误地续租了别人的锁
+			// 记录告警事件，但不尝试修正——因为此时锁已经合法地属于别人
+			refreshEvent.AddAction(events.NewAction(ActionWatchDogOwnerIdMismatch).
+				AddPayload("expected_owner_id", x.ownerId).
+				AddPayload("actual_owner_id", verifyInfo.OwnerId))
+		}
 	}
 
 	refreshEvent.Publish(ctx)
 	return err
 }
 
-// TODO 操作的时候超时时间设置得更精准一些
-//// 计算刷新操作允许的超时时间
-//func (x *WatchDogCommonsImpl) computeRefreshTimeout() time.Duration {
-//	t1 := (x.storageLock.options.LeaseExpireAfter - x.storageLock.options.LeaseRefreshInterval)
-//	if timeout < time.Second*30 {
-//		timeout = time.Second * 30
-//	}
-//}
-
-// Stop 停止续租协程
+// Stop 停止续租协程，并等待 goroutine 真正退出后才返回
 func (x *WatchDogCommonsImpl) Stop(ctx context.Context) error {
 
 	x.isRunning.Store(false)
 	x.e.Fork().AddActionByName(ActionWatchDogStop).Publish(ctx)
+
+	// 等待 goroutine 退出
+	if x.done != nil {
+		select {
+		case <-x.done:
+			// goroutine 已退出
+			return nil
+		case <-ctx.Done():
+			// 等待超时，goroutine 可能仍在运行，但不再阻塞调用者
+			return ctx.Err()
+		}
+	}
 
 	return nil
 }

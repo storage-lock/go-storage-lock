@@ -22,7 +22,6 @@ const (
 
 	ActionLockExists    = "StorageLock.Lock.Exists"
 	ActionLockNotExists = "StorageLock.Lock.NotExists"
-	ActionLockReleased  = "StorageLock.Lock.Released"
 	ActionLockExpired   = "StorageLock.Lock.Expired"
 	ActionLockReentry   = "StorageLock.Lock.Reentry"
 
@@ -70,6 +69,8 @@ const (
 	//ActionWatchDogExitByTooManyError = "WatchDog.Exit.TooManyError"
 
 	ActionWatchDogSetEvent = "WatchDog.SetEvent"
+
+	ActionWatchDogOwnerIdMismatch = "WatchDog.OwnerIdMismatch"
 )
 
 // Payload的名字

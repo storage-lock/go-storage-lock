@@ -6,6 +6,7 @@ import (
 	"github.com/storage-lock/go-storage"
 	storage_events "github.com/storage-lock/go-storage-events"
 	"math/rand"
+	"sync"
 	"time"
 )
 
@@ -23,6 +24,9 @@ type StorageLock struct {
 	// 负责为锁租约续期的看门狗，每个锁在被持有期间都会存在一个续租协程
 	// 当锁被获取的时候看门狗启动，当锁被释放的时候看门狗停止
 	storageLockWatchDog WatchDog
+
+	// 保护 storageLockWatchDog 的读写，防止 Lock 和 UnLock 并发操作时产生数据竞争
+	watchDogMu sync.Mutex
 
 	// 做一些ID自动生成的工作
 	ownerIdGenerator *OwnerIdGenerator
@@ -104,6 +108,31 @@ func (x *StorageLock) getLockInformation(ctx context.Context, e *events.Event, l
 		AddPayload(storage_events.PayloadLockInformationJsonString, lockInformationJsonString)
 	e.Fork().AddAction(action).Publish(ctx)
 	return storage.LockInformationFromJsonString(lockInformationJsonString)
+}
+
+// stopWatchDog 停止看门狗协程并清空引用，带互斥锁保护
+func (x *StorageLock) stopWatchDog(ctx context.Context, e *events.Event, lockInformation *storage.LockInformation) {
+	x.watchDogMu.Lock()
+	defer x.watchDogMu.Unlock()
+
+	if x.storageLockWatchDog != nil {
+		stopLastWatchDogEvent := e.Fork().SetLockInformation(lockInformation).AddActionByName(ActionWatchDogStop).SetWatchDogId(x.storageLockWatchDog.GetID())
+		err := x.storageLockWatchDog.Stop(ctx)
+		x.storageLockWatchDog = nil
+		if err != nil {
+			stopLastWatchDogEvent.AddAction(events.NewAction(ActionWatchDogStopError).SetErr(err))
+		} else {
+			stopLastWatchDogEvent.AddAction(events.NewAction(ActionWatchDogStopSuccess))
+		}
+		stopLastWatchDogEvent.Publish(ctx)
+	}
+}
+
+// setWatchDog 设置看门狗，带互斥锁保护
+func (x *StorageLock) setWatchDog(watchDog WatchDog) {
+	x.watchDogMu.Lock()
+	defer x.watchDogMu.Unlock()
+	x.storageLockWatchDog = watchDog
 }
 
 // ------------------------------------------------- --------------------------------------------------------------------
