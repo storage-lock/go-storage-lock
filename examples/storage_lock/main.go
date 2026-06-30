@@ -38,6 +38,13 @@ func (x *MemoryStorage) GetName() string {
 	return "memory-storage"
 }
 
+func (x *MemoryStorage) Capabilities() []storage.StorageCapability {
+	return []storage.StorageCapability{
+		storage.CapabilityCAS,
+		storage.CapabilityReliableTime,
+	}
+}
+
 func (x *MemoryStorage) Init(ctx context.Context) error {
 	// 没有要初始化的，在创建的时候就初始化了
 	return nil

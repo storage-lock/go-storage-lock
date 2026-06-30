@@ -160,11 +160,15 @@ func (x *StorageLock) lockExpired(ctx context.Context, e *events.Event, lockId, 
 			e.Fork().AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersionError).SetErr(err)).Publish(ctx)
 			return err
 		}
-	} else {
-		// 抢占成功
-		e.Fork().AddActionByName(storage_events.ActionStorageUpdateWithVersionSuccess).Publish(ctx)
-		return nil
 	}
+
+	// 抢占成功
+	e.Fork().AddActionByName(storage_events.ActionStorageUpdateWithVersionSuccess).Publish(ctx)
+
+	// 抢占过期锁相当于新持有，需要启动新的看门狗来续租
+	// 之前可能有残留的看门狗协程（理论上不应该有，但防御性清理一下）
+	x.stopWatchDog(ctx, e.Fork(), newLockInformation)
+	return x.startWatchDog(ctx, e.Fork(), lockId, ownerId, newLockInformation)
 }
 
 // 进入重入锁的逻辑，尝试对可重入锁的层级加一
@@ -253,6 +257,14 @@ func (x *StorageLock) lockNotExists(ctx context.Context, e *events.Event, lockId
 
 	// 插入成功，看下如果之前有续租协程的话就停掉，这一步是为了防止之前有资源未清理干净
 	x.stopWatchDog(ctx, e.Fork(), lockInformation)
+
+	// 为自己创建并启动一只新的看门狗
+	return x.startWatchDog(ctx, e.Fork(), lockId, ownerId, lockInformation)
+}
+
+// startWatchDog 创建并启动一只新的看门狗协程，用于在锁持有期间自动续租
+// 如果看门狗创建或启动失败，会尝试回滚（释放）刚获取的锁
+func (x *StorageLock) startWatchDog(ctx context.Context, e *events.Event, lockId, ownerId string, lockInformation *storage.LockInformation) error {
 
 	// 为自己创建一只新的看门狗
 	watchDog, err := x.options.WatchDogFactory.NewWatchDog(ctx, e.Fork(), x, ownerId)

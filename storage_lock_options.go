@@ -75,6 +75,15 @@ type StorageLockOptions struct {
 
 	// 版本未命中时的重试间隔
 	VersionMissRetryInterval time.Duration
+
+	// 跳过存储能力检查，默认为 false
+	// 当设置为 true 时，即使存储实现不支持 CAS 或可靠时间源，也允许创建锁
+	// ⚠️ 警告：跳过能力检查可能导致锁的互斥性被破坏，仅建议在以下场景使用：
+	//   - 开发和测试环境
+	//   - 单进程内的锁协调
+	//   - 低并发的多进程场景
+	// 生产环境请确保存储实现满足所有必要条件
+	SkipCapabilityCheck bool
 }
 
 // NewStorageLockOptions 使用默认值创建锁的配置项
@@ -123,5 +132,10 @@ func (x *StorageLockOptions) SetWatchDogFactory(watchDogFactory WatchDogFactory)
 
 func (x *StorageLockOptions) SetVersionMissRetryInterval(versionMissRetryInterval time.Duration) *StorageLockOptions {
 	x.VersionMissRetryInterval = versionMissRetryInterval
+	return x
+}
+
+func (x *StorageLockOptions) SetSkipCapabilityCheck(skip bool) *StorageLockOptions {
+	x.SkipCapabilityCheck = skip
 	return x
 }

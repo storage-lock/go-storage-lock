@@ -31,9 +31,12 @@ type WatchDogCommonsImpl struct {
 	// 是为谁而续这个租约，即锁的持有者
 	ownerId string
 
-	// goroutine 退出信号：goroutine 退出时 close(done)，Stop 等待此信号
+	// stop: Stop 时 close，用于通知 goroutine 立即退出（可中断 sleep）
+	stop chan struct{}
+	// done: goroutine 真正退出后 close，Stop 等待此信号确认 goroutine 已结束
 	done chan struct{}
-	// 确保 done 只被 close 一次
+	// 确保 stop/done 各只被 close 一次
+	stopOnce sync.Once
 	doneOnce sync.Once
 }
 
@@ -84,12 +87,15 @@ func (x *WatchDogCommonsImpl) Start(ctx context.Context) error {
 	// 发送开始的信号
 	x.e.Fork().AddActionByName(ActionWatchDogStart).Publish(ctx)
 
-	// 初始化 done channel，用于 Stop 等待 goroutine 退出
+	// 初始化 stop/done channel
+	// stop: Stop 时 close，goroutine 监听它来立即中断 sleep 退出
+	// done: goroutine 退出时 close，Stop 等待它确认 goroutine 已结束
+	x.stop = make(chan struct{})
 	x.done = make(chan struct{})
 	x.isRunning.Store(true)
 	go func() {
 
-		// 确保 goroutine 退出时关闭 done channel，这样 Stop 就能收到信号
+		// goroutine 退出时关闭 done channel，通知 Stop 已结束
 		defer x.doneOnce.Do(func() { close(x.done) })
 
 		// 已经刷新成功多少次了
@@ -114,7 +120,14 @@ func (x *WatchDogCommonsImpl) Start(ctx context.Context) error {
 		if needSleep > time.Second {
 			needSleep = time.Second
 		}
-		time.Sleep(needSleep)
+		// 使用 select 监听 stop channel，使 Stop 能立即唤醒此 sleep，避免 UnLock 阻塞
+		select {
+		case <-x.stop:
+			// Stop 已经被调用，直接退出
+			return
+		case <-time.After(needSleep):
+			// 正常唤醒，继续刷新
+		}
 
 		for x.isRunning.Load() {
 
@@ -164,7 +177,14 @@ func (x *WatchDogCommonsImpl) Start(ctx context.Context) error {
 			}
 
 			// 休眠，避免刷新得太频繁导致乐观锁的版本miss率过高对底层存储系统产生负载
-			time.Sleep(x.computeRefreshSleepDuration(refreshBeginTime))
+			// 使用 select 监听 stop channel，使 Stop 能立即唤醒此 sleep
+			select {
+			case <-x.stop:
+				// Stop 已经被调用，直接退出循环
+				return
+			case <-time.After(x.computeRefreshSleepDuration(refreshBeginTime)):
+				// 正常唤醒，继续下一次刷新
+			}
 		}
 
 	}()
@@ -195,12 +215,10 @@ func (x *WatchDogCommonsImpl) refreshLeaseExpiredTime() error {
 		// 如果是锁已经不存在了，则先将续租协程停掉，以免在短时间内进行大量获取释放操作时积压了太多无用的续租协程过慢的退出
 		if errors.Is(err, ErrLockNotFound) {
 			refreshEvent.AddAction(events.NewAction(ActionLockNotFoundError).SetErr(err))
-			err := x.Stop(ctx)
-			if err != nil {
-				refreshEvent.AddAction(events.NewAction(ActionWatchDogStopError).SetErr(err))
-			} else {
-				refreshEvent.AddAction(events.NewAction(ActionWatchDogStopSuccess).SetErr(err))
-			}
+			// 注意：这里在 goroutine 内部，不能调用 Stop（Stop 会等待 done，而死锁）
+			// 只设置停止标志并 close stop，让循环自然退出
+			x.stopInternal()
+			refreshEvent.AddAction(events.NewAction(ActionWatchDogStopSuccess).SetErr(err))
 		} else {
 			refreshEvent.AddAction(events.NewAction(ActionGetLockInformationError).SetErr(err))
 		}
@@ -254,13 +272,23 @@ func (x *WatchDogCommonsImpl) refreshLeaseExpiredTime() error {
 	return err
 }
 
+// stopInternal 在 goroutine 内部调用，只设置停止标志并 close stop，
+// 不等待 done（否则会死锁：等待自身退出）。goroutine 会在下次 select 时收到 stop 信号退出
+func (x *WatchDogCommonsImpl) stopInternal() {
+	x.isRunning.Store(false)
+	x.stopOnce.Do(func() { close(x.stop) })
+}
+
 // Stop 停止续租协程，并等待 goroutine 真正退出后才返回
+// 通过 close(stop) 通知 goroutine 立即中断 sleep 退出，避免 UnLock 长时间阻塞
 func (x *WatchDogCommonsImpl) Stop(ctx context.Context) error {
 
 	x.isRunning.Store(false)
+	// close stop channel，唤醒 goroutine 中正在 select 的 sleep，使其立即退出
+	x.stopOnce.Do(func() { close(x.stop) })
 	x.e.Fork().AddActionByName(ActionWatchDogStop).Publish(ctx)
 
-	// 等待 goroutine 退出
+	// 等待 goroutine 真正退出（收到 done 信号）
 	if x.done != nil {
 		select {
 		case <-x.done:

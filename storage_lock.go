@@ -2,8 +2,9 @@ package storage_lock
 
 import (
 	"context"
+	"fmt"
 	"github.com/storage-lock/go-events"
-	"github.com/storage-lock/go-storage"
+	go_storage "github.com/storage-lock/go-storage"
 	storage_events "github.com/storage-lock/go-storage-events"
 	"math/rand"
 	"sync"
@@ -13,8 +14,8 @@ import (
 // StorageLock 基于存储介质的锁模型实现，底层存储介质Storage是可插拔的
 type StorageLock struct {
 
-	// 锁持久化存储到哪个存储介质上，storage.Storage是个接口，用来把锁进行持久化存储，这个接口有很多种不同的实现
-	storage storage.Storage
+	// 锁持久化存储到哪个存储介质上，go_storage.Storage是个接口，用来把锁进行持久化存储，这个接口有很多种不同的实现
+	storage go_storage.Storage
 	// 调用storage方法的时候不会直接调用，而是通过一层带事件监听和recover包着的执行器来调用，这样我们可以实现对锁的可观测性以及一些更高级的特性
 	storageExecutor *storage_events.WithEventSafeExecutor
 
@@ -36,7 +37,7 @@ type StorageLock struct {
 const LockIdPrefix = "storage-lock-id-"
 
 // NewStorageLock 指定锁的ID创建锁，其它的选项都使用默认的
-func NewStorageLock(storage storage.Storage, lockId string) (*StorageLock, error) {
+func NewStorageLock(storage go_storage.Storage, lockId string) (*StorageLock, error) {
 	options := NewStorageLockOptionsWithLockId(lockId)
 	return NewStorageLockWithOptions(storage, options)
 }
@@ -44,11 +45,19 @@ func NewStorageLock(storage storage.Storage, lockId string) (*StorageLock, error
 // NewStorageLockWithOptions 创建一个基于存储介质的锁
 // storage: 锁持久化的存储介质，不同的介质有不同的实现，比如基于Mysql、基于MongoDB
 // options: 创建和维护锁时的相关配置项
-func NewStorageLockWithOptions(storage storage.Storage, options *StorageLockOptions) (*StorageLock, error) {
+func NewStorageLockWithOptions(storage go_storage.Storage, options *StorageLockOptions) (*StorageLock, error) {
 
 	// 参数检查
 	if err := checkStorageLockOptions(options); err != nil {
 		return nil, err
+	}
+
+	// 检查存储实现是否满足分布式锁的必要条件（CAS + 可靠时间源）
+	if !options.SkipCapabilityCheck {
+		missingCapabilities := go_storage.CheckCapabilities(storage)
+		if len(missingCapabilities) > 0 {
+			return nil, fmt.Errorf("%w: storage %s missing capabilities: %v", ErrStorageCapabilityMissing, storage.GetName(), missingCapabilities)
+		}
 	}
 
 	// 触发创建锁的事件
@@ -86,7 +95,7 @@ func (x *StorageLock) retryIntervalRandomBase() time.Duration {
 // ctx:
 // e: 事件流推送
 // lockId: 要获取的锁的信息
-func (x *StorageLock) getLockInformation(ctx context.Context, e *events.Event, lockId string) (*storage.LockInformation, error) {
+func (x *StorageLock) getLockInformation(ctx context.Context, e *events.Event, lockId string) (*go_storage.LockInformation, error) {
 
 	e.AddActionByName("StorageLock.getLockInformation.Begin").Publish(ctx)
 
@@ -107,11 +116,11 @@ func (x *StorageLock) getLockInformation(ctx context.Context, e *events.Event, l
 		AddPayload(storage_events.PayloadLockId, lockId).
 		AddPayload(storage_events.PayloadLockInformationJsonString, lockInformationJsonString)
 	e.Fork().AddAction(action).Publish(ctx)
-	return storage.LockInformationFromJsonString(lockInformationJsonString)
+	return go_storage.LockInformationFromJsonString(lockInformationJsonString)
 }
 
 // stopWatchDog 停止看门狗协程并清空引用，带互斥锁保护
-func (x *StorageLock) stopWatchDog(ctx context.Context, e *events.Event, lockInformation *storage.LockInformation) {
+func (x *StorageLock) stopWatchDog(ctx context.Context, e *events.Event, lockInformation *go_storage.LockInformation) {
 	x.watchDogMu.Lock()
 	defer x.watchDogMu.Unlock()
 

@@ -41,3 +41,11 @@ var (
 	// ErrOwnerCanOnlyOne 锁的有拥有者只能有一个，这是尝试给锁指定了多个owner时会返回的错误
 	ErrOwnerCanOnlyOne = errors.New("lock owner only one")
 )
+
+var (
+
+	// ErrStorageCapabilityMissing 存储实现缺少分布式锁的必要能力
+	// 当 Storage 实现的 Capabilities() 方法返回值中缺少 CapabilityCAS 或 CapabilityReliableTime 时会返回此错误
+	// 这意味着该存储实现无法保证锁的正确性，不应被用于生产环境
+	ErrStorageCapabilityMissing = errors.New("storage missing required capabilities for distributed lock")
+)

@@ -4,6 +4,7 @@ go 1.19
 
 require (
 	github.com/golang-infrastructure/go-goroutine-id v0.0.0-20230917075314-f1af231c0b06
+	github.com/golang-infrastructure/go-iterator v0.0.0-20230524171120-56988a9b127c
 	github.com/storage-lock/go-events v0.0.3
 	github.com/storage-lock/go-storage v0.0.2
 	github.com/storage-lock/go-storage-events v0.0.5
@@ -13,7 +14,6 @@ require (
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/golang-infrastructure/go-iterator v0.0.0-20230524171120-56988a9b127c // indirect
 	github.com/golang-infrastructure/go-pointer v0.0.5 // indirect
 	github.com/golang-infrastructure/go-reflect-utils v0.0.0-20221130143747-965ef2eb09c3 // indirect
 	github.com/google/uuid v1.3.1 // indirect
@@ -23,3 +23,5 @@ require (
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/storage-lock/go-storage => ../go-storage
