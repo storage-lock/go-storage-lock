@@ -155,6 +155,12 @@ func (x *StorageLock) unlockRelease(ctx context.Context, e *events.Event, lockId
 		AddPayload(storage_events.PayloadLockInformation, lockInformation)
 	e.AddAction(unlockReleaseAction).Publish(ctx)
 
+	// 先停止看门狗，再删除锁记录
+	// 这非常重要：如果先 DeleteWithVersion 再 stopWatchDog，那么在 DeleteWithVersion 因版本 miss 重试期间，
+	// 看门狗仍在持续续租推进版本号，与 UnLock 形成竞争，导致 UnLock 无限重试（活锁）。
+	// 先停看门狗可让版本号稳定下来，DeleteWithVersion 才能成功。
+	x.stopWatchDog(ctx, e, lockInformation)
+
 	// 使用 DeleteWithVersion 真正从存储中删除锁记录，而不是仅仅把 LockCount 设为 0
 	// 这样下一个获取锁的人会走 lockNotExists → CreateWithVersion 路径，语义清晰且不会造成存储泄漏
 	err := x.storageExecutor.DeleteWithVersion(ctx, e, lockId, lastVersion, lockInformation)
@@ -169,9 +175,5 @@ func (x *StorageLock) unlockRelease(ctx context.Context, e *events.Event, lockId
 	}
 	e.Fork().AddAction(events.NewAction(storage_events.ActionStorageDeleteWithVersionSuccess)).Publish(ctx)
 
-	// 把看门狗协程也停止掉，不要再尝试续租了
-	x.stopWatchDog(ctx, e, lockInformation)
-
-	// 无论看门狗进程是否停止成功，这里都返回nil，看门狗接口的实现者负责保证异常情况下没有协程残留
 	return nil
 }
