@@ -114,7 +114,7 @@ func (x *StorageLock) lockExists(ctx context.Context, e *events.Event, lockId, o
 
 	e.SetLockId(lockId).SetOwnerId(ownerId).AddActionByName(ActionLockExists).Publish(ctx)
 
-	storageTime, err := x.storageExecutor.GetTime(ctx, e.Fork())
+	storageTime, err := x.getTime(ctx, e.Fork())
 	if err != nil {
 		e.Fork().AddAction(events.NewAction(storage_events.ActionStorageGetTimeError).SetErr(err)).Publish(ctx)
 		return err
@@ -122,6 +122,13 @@ func (x *StorageLock) lockExists(ctx context.Context, e *events.Event, lockId, o
 
 	// 看下锁是否已经过期了，如果已经过期了的话，则直接开始尝试抢占锁
 	if storageTime.After(lockInformation.LeaseExpireTime) {
+		return x.lockExpired(ctx, e.Fork(), lockId, ownerId, storageTime, lockInformation)
+	}
+
+	// 墓碑标记：LockCount==0 表示上一个持有者已释放，但底层存储不支持原子条件删除
+	// （如对象存储只有条件 PUT 没有条件 DELETE），释放时仅写入了墓碑而非真删记录。
+	// 此时锁逻辑上已不存在，等价于"可被抢占的失效记录"，走与过期相同的抢占路径。
+	if lockInformation.LockCount == 0 {
 		return x.lockExpired(ctx, e.Fork(), lockId, ownerId, storageTime, lockInformation)
 	}
 
@@ -215,8 +222,8 @@ func (x *StorageLock) lockNotExists(ctx context.Context, e *events.Event, lockId
 	// 触发事件先
 	e.SetLockId(lockId).SetOwnerId(ownerId).SetLockInformation(lockInformation).AddActionByName(ActionLockNotExists).Publish(ctx)
 
-	// 获取Storage的时间
-	storageTime, err := x.storageExecutor.GetTime(ctx, e.Fork())
+	// 获取Storage的时间（或外部注入的时间源）
+	storageTime, err := x.getTime(ctx, e.Fork())
 	if err != nil {
 		// 完蛋，出师未捷身先死，获取时间就没获取到
 		e.Fork().AddAction(events.NewAction(storage_events.ActionStorageGetTimeError).SetErr(err)).Publish(ctx)

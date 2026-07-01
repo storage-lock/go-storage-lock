@@ -1,6 +1,7 @@
 package storage_lock
 
 import (
+	go_storage "github.com/storage-lock/go-storage"
 	"github.com/storage-lock/go-events"
 	"time"
 )
@@ -84,6 +85,13 @@ type StorageLockOptions struct {
 	//   - 低并发的多进程场景
 	// 生产环境请确保存储实现满足所有必要条件
 	SkipCapabilityCheck bool
+
+	// TimeProvider 外部注入的可靠时间源，用于弥补 Storage 自身没有服务端时钟的情况
+	// 例如对象存储（S3/OSS）、纯 HTTP 存储没有服务端时钟，无法自身满足 CapabilityReliableTime，
+	// 此时通过注入外部时间源（如 go-ntp-time-provider 提供的 NTP 时间源）来满足必要条件。
+	// 如果 Storage 自身已声明 CapabilityReliableTime，此字段可留空（优先使用 Storage 的时间）。
+	// ⚠️ 注入的时间源必须单调递增、不能出现时钟回拨，否则会破坏锁的互斥性
+	TimeProvider go_storage.TimeProvider
 }
 
 // NewStorageLockOptions 使用默认值创建锁的配置项
@@ -137,5 +145,12 @@ func (x *StorageLockOptions) SetVersionMissRetryInterval(versionMissRetryInterva
 
 func (x *StorageLockOptions) SetSkipCapabilityCheck(skip bool) *StorageLockOptions {
 	x.SkipCapabilityCheck = skip
+	return x
+}
+
+// SetTimeProvider 设置外部注入的可靠时间源
+// 用于弥补 Storage 自身没有服务端时钟的情况（如对象存储、HTTP 存储）
+func (x *StorageLockOptions) SetTimeProvider(timeProvider go_storage.TimeProvider) *StorageLockOptions {
+	x.TimeProvider = timeProvider
 	return x
 }

@@ -161,8 +161,21 @@ func (x *StorageLock) unlockRelease(ctx context.Context, e *events.Event, lockId
 	// 先停看门狗可让版本号稳定下来，DeleteWithVersion 才能成功。
 	x.stopWatchDog(ctx, e, lockInformation)
 
-	// 使用 DeleteWithVersion 真正从存储中删除锁记录，而不是仅仅把 LockCount 设为 0
-	// 这样下一个获取锁的人会走 lockNotExists → CreateWithVersion 路径，语义清晰且不会造成存储泄漏
+	// 释放路径分两种：
+	//   - 存储支持原子条件删除（CapabilityAtomicDelete）：用 DeleteWithVersion 真正删除记录，
+	//     下次获取锁走 lockNotExists → CreateWithVersion，语义最清晰
+	//   - 存储不支持原子条件删除（如对象存储只有条件 PUT 没有条件 DELETE）：
+	//     降级为 UpdateWithVersion 写入"墓碑"标记（LockCount=0），记录保留但逻辑上已释放，
+	//     下次获取锁走 lockExists → 识别 LockCount==0 → lockExpired 抢占路径。
+	//     互斥性不受影响——墓碑写入本身就是一次 UpdateWithVersion 的原子 CAS。
+	if storage.SupportsAtomicDelete(x.storage) {
+		return x.unlockReleaseByDelete(ctx, e, lockId, ownerId, lockInformation, lastVersion)
+	}
+	return x.unlockReleaseByTombstone(ctx, e, lockId, ownerId, lockInformation, lastVersion)
+}
+
+// unlockReleaseByDelete 通过 DeleteWithVersion 真正删除锁记录（存储支持原子条件删除时）
+func (x *StorageLock) unlockReleaseByDelete(ctx context.Context, e *events.Event, lockId, ownerId string, lockInformation *storage.LockInformation, lastVersion storage.Version) error {
 	err := x.storageExecutor.DeleteWithVersion(ctx, e, lockId, lastVersion, lockInformation)
 	if err != nil {
 		if errors.Is(err, ErrVersionMiss) {
@@ -174,6 +187,33 @@ func (x *StorageLock) unlockRelease(ctx context.Context, e *events.Event, lockId
 		}
 	}
 	e.Fork().AddAction(events.NewAction(storage_events.ActionStorageDeleteWithVersionSuccess)).Publish(ctx)
+	return nil
+}
 
+// unlockReleaseByTombstone 通过 UpdateWithVersion 写入墓碑标记释放锁（存储不支持原子条件删除时）
+// 墓碑 = LockCount 置 0、LeaseExpireTime 设为当前时间（立即失效），记录保留但逻辑已释放。
+// 下次获取锁时 lockExists 识别 LockCount==0 走抢占路径。
+func (x *StorageLock) unlockReleaseByTombstone(ctx context.Context, e *events.Event, lockId, ownerId string, lockInformation *storage.LockInformation, lastVersion storage.Version) error {
+	// 构造墓碑：版本号 +1，LockCount=0，租约立即过期
+	lockInformation.Version = lastVersion + 1
+	lockInformation.LockCount = 0
+	now, err := x.getTime(ctx, e.Fork())
+	if err != nil {
+		e.Fork().AddAction(events.NewAction(storage_events.ActionStorageGetTimeError).SetErr(err)).Publish(ctx)
+		return err
+	}
+	lockInformation.LeaseExpireTime = now // 立即过期，双保险（主要靠 LockCount==0 识别）
+
+	err = x.storageExecutor.UpdateWithVersion(ctx, e.Fork(), lockId, lastVersion, lockInformation.Version, lockInformation)
+	if err != nil {
+		if errors.Is(err, ErrVersionMiss) {
+			e.Fork().AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersionMiss).SetErr(err)).Publish(ctx)
+			return ErrVersionMiss
+		} else {
+			e.Fork().AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersionError).SetErr(err)).Publish(ctx)
+			return err
+		}
+	}
+	e.Fork().AddActionByName(storage_events.ActionStorageUpdateWithVersionSuccess).Publish(ctx)
 	return nil
 }

@@ -52,11 +52,24 @@ func NewStorageLockWithOptions(storage go_storage.Storage, options *StorageLockO
 		return nil, err
 	}
 
-	// 检查存储实现是否满足分布式锁的必要条件（CAS + 可靠时间源）
+	// 检查存储实现是否满足分布式锁的必要条件
+	// 必要条件 1：CAS 原子性（CapabilityCAS）——硬性，不可降级，直接保护互斥性
+	// 必要条件 2：可靠时间源——可由"Storage 声明 CapabilityReliableTime"或"外部注入 options.TimeProvider"满足其一
+	//   这让对象存储、HTTP 存储等无服务端时钟的介质可通过注入 NTP 时间源接入
 	if !options.SkipCapabilityCheck {
 		missingCapabilities := go_storage.CheckCapabilities(storage)
+		// 若仅缺 ReliableTime 且用户注入了外部 TimeProvider，则视为已满足
 		if len(missingCapabilities) > 0 {
-			return nil, fmt.Errorf("%w: storage %s missing capabilities: %v", ErrStorageCapabilityMissing, storage.GetName(), missingCapabilities)
+			filtered := make([]go_storage.StorageCapability, 0, len(missingCapabilities))
+			for _, c := range missingCapabilities {
+				if c == go_storage.CapabilityReliableTime && options.TimeProvider != nil {
+					continue // 由外部 TimeProvider 替代满足
+				}
+				filtered = append(filtered, c)
+			}
+			if len(filtered) > 0 {
+				return nil, fmt.Errorf("%w: storage %s missing capabilities: %v", ErrStorageCapabilityMissing, storage.GetName(), filtered)
+			}
 		}
 	}
 
@@ -76,9 +89,19 @@ func NewStorageLockWithOptions(storage go_storage.Storage, options *StorageLockO
 	return lock, nil
 }
 
+// getTime 获取用于租约计算的时间
+// 优先使用外部注入的 options.TimeProvider（用于对象存储、HTTP 存储等无服务端时钟的介质），
+// 否则回退到 Storage 自身的时间。两者取其一，由能力校验保证至少有一个可用。
+func (x *StorageLock) getTime(ctx context.Context, e *events.Event) (time.Time, error) {
+	if x.options.TimeProvider != nil {
+		return x.options.TimeProvider.GetTime(ctx)
+	}
+	return x.storageExecutor.GetTime(ctx, e)
+}
+
 // 获取租约下一次的过期时间
 func (x *StorageLock) getLeaseExpireTime(ctx context.Context, e *events.Event) (time.Time, error) {
-	storageTime, err := x.storageExecutor.GetTime(ctx, e)
+	storageTime, err := x.getTime(ctx, e)
 	if err != nil {
 		var zero time.Time
 		return zero, err
