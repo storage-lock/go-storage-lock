@@ -193,9 +193,26 @@ func (x *WatchDogCommonsImpl) Start(ctx context.Context) error {
 }
 
 // 计算距离下次刷新应该休眠的时间
+//
+// ⚠️ 理论漏洞修复：当一次刷新耗时超过 LeaseRefreshInterval（存储慢、网络抖动）时，
+// 简单相减会得到负值，time.After(负值) 立即触发，看门狗进入无间隔疯狂重试，
+// 把已经过载的存储彻底打爆（故障放大/雪崩）。因此对 sleep 做下界保护：
+// 取"剩余间隔"与"LeaseRefreshInterval 的一半"中较大者，保证两次刷新间至少有
+// 半个刷新间隔的喘息；同时绝不低于一个最小兜底值。
 func (x *WatchDogCommonsImpl) computeRefreshSleepDuration(refreshBeginTime time.Time) time.Duration {
 	cost := time.Now().Sub(refreshBeginTime)
 	needSleepDuration := x.storageLock.options.LeaseRefreshInterval - cost
+
+	// 半个刷新间隔，作为"刷新过慢"时的下界，避免疯狂重试
+	halfInterval := x.storageLock.options.LeaseRefreshInterval / 2
+	if needSleepDuration < halfInterval {
+		needSleepDuration = halfInterval
+	}
+	// 绝对最小兜底，防止 LeaseRefreshInterval 配置过小
+	const minSleep = time.Millisecond * 100
+	if needSleepDuration < minSleep {
+		needSleepDuration = minSleep
+	}
 	return needSleepDuration
 }
 
@@ -255,17 +272,15 @@ func (x *WatchDogCommonsImpl) refreshLeaseExpiredTime() error {
 		refreshEvent.AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersion + "-error").SetErr(err))
 	} else {
 		refreshEvent.AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersion + "-success"))
-
-		// 防御性检查：UpdateWithVersion 成功后，验证锁的 OwnerId 仍然是自己的
-		// 这是为了防止在 Get 和 UpdateWithVersion 之间的时间窗口内，锁被其他人抢占后又被我们错误续租
-		verifyInfo, verifyErr := x.storageLock.getLockInformation(ctx, x.e, x.lockId)
-		if verifyErr == nil && verifyInfo.OwnerId != x.ownerId {
-			// OwnerId 已经不是自己了，说明我们可能错误地续租了别人的锁
-			// 记录告警事件，但不尝试修正——因为此时锁已经合法地属于别人
-			refreshEvent.AddAction(events.NewAction(ActionWatchDogOwnerIdMismatch).
-				AddPayload("expected_owner_id", x.ownerId).
-				AddPayload("actual_owner_id", verifyInfo.OwnerId))
-		}
+		// 这里不再做"续租后再次 Get 校验 OwnerId"的防御性检查，原因如下：
+		// UpdateWithVersion 是原子的 CAS：仅当存储中当前版本 == lastVersion 时才会写入成功，
+		// 而能拿到 lastVersion 说明上一步 Get 时锁还是自己的。若在 Get 与 UpdateWithVersion 之间
+		// 锁被别人抢占（版本号已变），CAS 必然失败返回 ErrVersionMiss，根本走不到这里。
+		// 因此若走到这里，续租一定是合法的——CAS 本身就是互斥性的保障，无需二次 Get 校验。
+		// 之前的"续租后 verify 发现 OwnerId 变了只告警不修正"是无效防御：
+		//   - 正常 CAS 下 verify 读到 owner≠自己只可能是"续租成功后又被别人合法抢占"，无需修正；
+		//   - 若存储 CAS 真有缺陷导致错误续租，verify 也无法与之区分，告警只会产生误报噪音。
+		// 移除它避免了每次续租多一次 Get 的存储负载，也让互斥性保障回归到 CAS 这一单一正确来源。
 	}
 
 	refreshEvent.Publish(ctx)

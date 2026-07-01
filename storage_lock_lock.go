@@ -306,8 +306,29 @@ func (x *StorageLock) lockRollback(ctx context.Context, e *events.Event, lockId,
 
 	e.AddAction(events.NewAction(ActionLockRollback)).Publish(ctx)
 
-	// 回滚时直接删除锁记录，因为锁刚创建还没有被其他人竞争
-	err := x.storageExecutor.DeleteWithVersion(ctx, e.Fork(), lockId, lockInformation.Version, lockInformation)
+	// 回滚路径与释放路径一致：按存储是否支持原子条件删除分流
+	// 若存储不支持原子删除（如对象存储），用 UpdateWithVersion 写墓碑(LockCount=0)，
+	// 否则 DeleteWithVersion 真删。锁刚创建还未被竞争，两种方式都能让下次 Lock 正常获取。
+	if storage.SupportsAtomicDelete(x.storage) {
+		err := x.storageExecutor.DeleteWithVersion(ctx, e.Fork(), lockId, lockInformation.Version, lockInformation)
+		if err != nil {
+			e.Fork().AddAction(events.NewAction(ActionLockRollbackError).SetErr(err)).Publish(ctx)
+		} else {
+			e.Fork().AddAction(events.NewAction(ActionLockRollbackSuccess)).Publish(ctx)
+		}
+		return
+	}
+
+	// 墓碑回滚：版本号 +1，LockCount=0
+	tombstone := &storage.LockInformation{
+		LockId:          lockInformation.LockId,
+		OwnerId:         lockInformation.OwnerId,
+		Version:         lockInformation.Version + 1,
+		LockCount:       0,
+		LockBeginTime:   lockInformation.LockBeginTime,
+		LeaseExpireTime: lockInformation.LeaseExpireTime,
+	}
+	err := x.storageExecutor.UpdateWithVersion(ctx, e.Fork(), lockId, lockInformation.Version, tombstone.Version, tombstone)
 	if err != nil {
 		e.Fork().AddAction(events.NewAction(ActionLockRollbackError).SetErr(err)).Publish(ctx)
 	} else {
