@@ -20,7 +20,9 @@ type WatchDogCommonsImpl struct {
 	lockId string
 
 	// 当前协程运行期间产生的事件都是这个事件的子事件
-	e *events.Event
+	// 用 atomic.Pointer 保护：SetEvent 可在运行期被外部调用替换事件源，与 goroutine 内的
+	// 频繁读取存在数据竞争（漏洞 M）。atomic.Pointer 提供无锁的原子读写，消除竞态。
+	e atomic.Pointer[events.Event]
 
 	// 协程是否处在运行状态的标志位，为true表示处在运行状态，为false表示未处在运行状态
 	isRunning atomic.Bool
@@ -61,14 +63,16 @@ func NewWatchDogCommonsImpl(ctx context.Context, e *events.Event, lock *StorageL
 	// 发送创建看门狗的事件
 	e.AddActionByName(ActionWatchDogCreate).Publish(ctx)
 
-	return &WatchDogCommonsImpl{
+	wd := &WatchDogCommonsImpl{
 		id:          id,
 		lockId:      lockId,
 		isRunning:   atomic.Bool{},
 		storageLock: lock,
 		ownerId:     ownerId,
-		e:           e,
 	}
+	// e 用 atomic.Pointer，构造后单独 Store（结构体字面量无法直接赋 atomic 类型）
+	wd.e.Store(e)
+	return wd
 }
 
 const WatchDogCommonsImplName = "watch-dog-commons-impl"
@@ -85,7 +89,7 @@ func (x *WatchDogCommonsImpl) GetID() string {
 func (x *WatchDogCommonsImpl) Start(ctx context.Context) error {
 
 	// 发送开始的信号
-	x.e.Fork().AddActionByName(ActionWatchDogStart).Publish(ctx)
+	x.e.Load().Fork().AddActionByName(ActionWatchDogStart).Publish(ctx)
 
 	// 初始化 stop/done channel
 	// stop: Stop 时 close，goroutine 监听它来立即中断 sleep 退出
@@ -108,7 +112,7 @@ func (x *WatchDogCommonsImpl) Start(ctx context.Context) error {
 			exitAction := events.NewAction(ActionWatchDogExit).
 				AddPayload(PayloadRefreshSuccessCount, refreshSuccessCount).
 				AddPayload(PayloadContinueErrorCount, continueErrorCount)
-			x.e.Fork().AddAction(exitAction).Publish(context.Background())
+			x.e.Load().Fork().AddAction(exitAction).Publish(context.Background())
 		}()
 
 		// 先休眠一下，再死循环刷新
@@ -135,7 +139,7 @@ func (x *WatchDogCommonsImpl) Start(ctx context.Context) error {
 			refreshBeginAction := events.NewAction(ActionWatchDogRefreshBegin).
 				AddPayload(PayloadContinueErrorCount, continueErrorCount).
 				AddPayload(PayloadRefreshSuccessCount, refreshSuccessCount)
-			x.e.Fork().AddAction(refreshBeginAction).Publish(context.Background())
+			x.e.Load().Fork().AddAction(refreshBeginAction).Publish(context.Background())
 
 			// 调用刷新的方法进行一次刷新
 			refreshBeginTime := time.Now()
@@ -149,7 +153,7 @@ func (x *WatchDogCommonsImpl) Start(ctx context.Context) error {
 						AddPayload(PayloadContinueErrorCount, continueErrorCount).
 						AddPayload(PayloadRefreshSuccessCount, refreshSuccessCount).
 						SetErr(err)
-					x.e.Fork().AddAction(notLockOwnerAction).Publish(context.Background())
+					x.e.Load().Fork().AddAction(notLockOwnerAction).Publish(context.Background())
 					return
 				}
 
@@ -158,7 +162,7 @@ func (x *WatchDogCommonsImpl) Start(ctx context.Context) error {
 					AddPayload(PayloadContinueErrorCount, continueErrorCount).
 					AddPayload(PayloadRefreshSuccessCount, refreshSuccessCount).
 					SetErr(err)
-				x.e.Fork().AddAction(refreshErrorAction).Publish(context.Background())
+				x.e.Load().Fork().AddAction(refreshErrorAction).Publish(context.Background())
 
 			} else {
 
@@ -172,7 +176,7 @@ func (x *WatchDogCommonsImpl) Start(ctx context.Context) error {
 				refreshSuccessAction := events.NewAction(ActionWatchDogRefreshSuccess).
 					AddPayload(PayloadContinueErrorCount, continueErrorCount).
 					AddPayload(PayloadRefreshSuccessCount, refreshSuccessCount)
-				x.e.Fork().AddAction(refreshSuccessAction).Publish(context.Background())
+				x.e.Load().Fork().AddAction(refreshSuccessAction).Publish(context.Background())
 
 			}
 
@@ -219,14 +223,14 @@ func (x *WatchDogCommonsImpl) computeRefreshSleepDuration(refreshBeginTime time.
 // 刷新锁的过期时间，为其续约
 func (x *WatchDogCommonsImpl) refreshLeaseExpiredTime() error {
 
-	refreshEvent := x.e.Fork().AddActionByName(ActionWatchDogRefresh)
+	refreshEvent := x.e.Load().Fork().AddActionByName(ActionWatchDogRefresh)
 
 	// 计算操作超时时长，这里就简单的设置为不超过租约的间隔了
 	ctx, cancelFunc := context.WithTimeout(context.Background(), x.storageLock.options.LeaseRefreshInterval)
 	defer cancelFunc()
 
 	// 查询锁的当前状态
-	information, err := x.storageLock.getLockInformation(ctx, x.e, x.lockId)
+	information, err := x.storageLock.getLockInformation(ctx, x.e.Load(), x.lockId)
 	if err != nil {
 
 		// 如果是锁已经不存在了，则先将续租协程停掉，以免在短时间内进行大量获取释放操作时积压了太多无用的续租协程过慢的退出
@@ -301,7 +305,7 @@ func (x *WatchDogCommonsImpl) Stop(ctx context.Context) error {
 	x.isRunning.Store(false)
 	// close stop channel，唤醒 goroutine 中正在 select 的 sleep，使其立即退出
 	x.stopOnce.Do(func() { close(x.stop) })
-	x.e.Fork().AddActionByName(ActionWatchDogStop).Publish(ctx)
+	x.e.Load().Fork().AddActionByName(ActionWatchDogStop).Publish(ctx)
 
 	// 等待 goroutine 真正退出（收到 done 信号）
 	if x.done != nil {
@@ -322,10 +326,10 @@ func (x *WatchDogCommonsImpl) Stop(ctx context.Context) error {
 func (x *WatchDogCommonsImpl) SetEvent(e *events.Event) {
 
 	// 更新事件源
-	x.e = e
+	x.e.Store(e)
 
 	// 触发看门狗事件源更改事件
 	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Minute*5)
 	defer cancelFunc()
-	x.e.AddAction(events.NewAction(ActionWatchDogSetEvent)).Publish(ctx)
+	x.e.Load().AddAction(events.NewAction(ActionWatchDogSetEvent)).Publish(ctx)
 }
