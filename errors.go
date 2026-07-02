@@ -7,6 +7,10 @@ var (
 	ErrLockIdEmpty          = errors.New("lock id can not empty")
 	ErrLeaseExpireAfter     = errors.New("LeaseExpireAfter must > time.Second * 3 ")
 	ErrLeaseRefreshInterval = errors.New("LeaseRefreshInterval must < ErrLeaseExpireAfter ")
+	// ErrLeaseRefreshIntervalTooClose 续租刷新间隔与租约过期时间过于接近。
+	// 若 LeaseExpireAfter - LeaseRefreshInterval 的余量过小，一次续租的网络抖动/存储延迟
+	// 就可能让租约在下一次刷新完成前过期，被他人合法抢占，破坏互斥性（漏洞 I）。
+	ErrLeaseRefreshIntervalTooClose = errors.New("LeaseRefreshInterval too close to LeaseExpireAfter, leave enough margin for renewal jitter")
 )
 
 var (

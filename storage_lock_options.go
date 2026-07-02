@@ -41,6 +41,21 @@ func checkStorageLockOptions(options *StorageLockOptions) error {
 		return ErrLeaseRefreshInterval
 	}
 
+	// 漏洞 I 修复：续租刷新间隔与租约过期时间必须留足安全余量。
+	// 续租把过期时间推到"续租时刻 + LeaseExpireAfter"，两次刷新间隔约 LeaseRefreshInterval。
+	// 若余量 (LeaseExpireAfter - LeaseRefreshInterval) 过小，一次续租的网络抖动/存储延迟
+	// 就会让租约在下次刷新完成前过期，被他人合法抢占（lockExpired 路径），破坏互斥性。
+	// 强制余量至少为 max(1s, LeaseExpireAfter/3)，保证续租有足够重试窗口。
+	// 可通过 SkipLeaseMarginCheck 跳过（自担风险）。
+	margin := options.LeaseExpireAfter - options.LeaseRefreshInterval
+	minMargin := time.Second
+	if third := options.LeaseExpireAfter / 3; third > minMargin {
+		minMargin = third
+	}
+	if !options.SkipLeaseMarginCheck && margin < minMargin {
+		return ErrLeaseRefreshIntervalTooClose
+	}
+
 	// 如果没有设置看门狗factory的话，则为其设置上默认的
 	if options.WatchDogFactory == nil {
 		options.WatchDogFactory = NewWatchDogFactoryCommonsImpl()
@@ -85,6 +100,12 @@ type StorageLockOptions struct {
 	//   - 低并发的多进程场景
 	// 生产环境请确保存储实现满足所有必要条件
 	SkipCapabilityCheck bool
+
+	// SkipLeaseMarginCheck 跳过"续租刷新间隔与租约过期时间的安全余量"检查，默认为 false。
+	// 漏洞 I：余量过小时一次续租抖动会让租约在下次刷新前过期、被他人抢占，破坏互斥性。
+	// 默认强制余量 >= max(1s, LeaseExpireAfter/3)。仅在确信你的环境续租延迟极小且稳定、
+	// 或单进程无并发抢占风险时才跳过，自担风险。
+	SkipLeaseMarginCheck bool
 
 	// TimeProvider 外部注入的可靠时间源，用于弥补 Storage 自身没有服务端时钟的情况
 	// 例如对象存储（S3/OSS）、纯 HTTP 存储没有服务端时钟，无法自身满足 CapabilityReliableTime，
@@ -145,6 +166,12 @@ func (x *StorageLockOptions) SetVersionMissRetryInterval(versionMissRetryInterva
 
 func (x *StorageLockOptions) SetSkipCapabilityCheck(skip bool) *StorageLockOptions {
 	x.SkipCapabilityCheck = skip
+	return x
+}
+
+// SetSkipLeaseMarginCheck 设置是否跳过续租间隔与租约过期的安全余量检查（漏洞 I）
+func (x *StorageLockOptions) SetSkipLeaseMarginCheck(skip bool) *StorageLockOptions {
+	x.SkipLeaseMarginCheck = skip
 	return x
 }
 
