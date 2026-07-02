@@ -40,6 +40,15 @@ type WatchDogCommonsImpl struct {
 	// 确保 stop/done 各只被 close 一次
 	stopOnce sync.Once
 	doneOnce sync.Once
+
+	// runCtx/runCancel：看门狗整个生命周期的 context。
+	// 漏洞（问题3/liveness）修复：refreshLeaseExpiredTime 内的存储调用用从 runCtx 派生的子 ctx，
+	// 原本子 ctx 只带 LeaseRefreshInterval 超时、不监听 stop，导致 goroutine 卡在慢存储 RPC 里时
+	// Stop 的 close(stop) 无法打断它——Stop 只能干等到子 ctx 自然超时或自身 ctx 超时后返回，
+	// goroutine 仍存活（泄漏）。Stop 时 runCancel 取消 runCtx，所有派生子 ctx 立即取消，
+	// 存储调用立刻返回，goroutine 迅速从 refreshLeaseExpiredTime 返回并在下次 select 命中 stop 退出。
+	runCtx    context.Context
+	runCancel context.CancelFunc
 }
 
 // WatchDogIDPrefix 看门狗协程分配的ID
@@ -96,6 +105,8 @@ func (x *WatchDogCommonsImpl) Start(ctx context.Context) error {
 	// done: goroutine 退出时 close，Stop 等待它确认 goroutine 已结束
 	x.stop = make(chan struct{})
 	x.done = make(chan struct{})
+	// runCtx 贯穿看门狗生命周期，refresh 子 ctx 从它派生，Stop 取消它即可打断卡在存储 RPC 里的 goroutine
+	x.runCtx, x.runCancel = context.WithCancel(context.Background())
 	x.isRunning.Store(true)
 	go func() {
 
@@ -225,8 +236,10 @@ func (x *WatchDogCommonsImpl) refreshLeaseExpiredTime() error {
 
 	refreshEvent := x.e.Load().Fork().AddActionByName(ActionWatchDogRefresh)
 
-	// 计算操作超时时长，这里就简单的设置为不超过租约的间隔了
-	ctx, cancelFunc := context.WithTimeout(context.Background(), x.storageLock.options.LeaseRefreshInterval)
+	// 子 ctx 从 runCtx 派生：既带 LeaseRefreshInterval 超时，又随看门狗 Stop 而取消。
+	// 这样 Stop 调用 runCancel 时，卡在 getLockInformation/UpdateWithVersion 等存储 RPC 里的
+	// goroutine 会立即收到取消信号返回，而不必干等子 ctx 自然超时（问题3 修复）。
+	ctx, cancelFunc := context.WithTimeout(x.runCtx, x.storageLock.options.LeaseRefreshInterval)
 	defer cancelFunc()
 
 	// 查询锁的当前状态
@@ -296,6 +309,8 @@ func (x *WatchDogCommonsImpl) refreshLeaseExpiredTime() error {
 func (x *WatchDogCommonsImpl) stopInternal() {
 	x.isRunning.Store(false)
 	x.stopOnce.Do(func() { close(x.stop) })
+	// 取消 runCtx，让本 goroutine 内尚未返回的存储调用立即取消，加速自身收尾
+	x.stopRunCtx()
 }
 
 // Stop 停止续租协程，并等待 goroutine 真正退出后才返回
@@ -305,6 +320,9 @@ func (x *WatchDogCommonsImpl) Stop(ctx context.Context) error {
 	x.isRunning.Store(false)
 	// close stop channel，唤醒 goroutine 中正在 select 的 sleep，使其立即退出
 	x.stopOnce.Do(func() { close(x.stop) })
+	// 取消 runCtx：打断可能正卡在 getLockInformation/UpdateWithVersion 等存储 RPC 里的 goroutine，
+	// 使其迅速返回并在下次 select 命中 stop 退出，避免 Stop 干等到自身 ctx 超时后仍遗留存活 goroutine（问题3）
+	x.stopRunCtx()
 	x.e.Load().Fork().AddActionByName(ActionWatchDogStop).Publish(ctx)
 
 	// 等待 goroutine 真正退出（收到 done 信号）
@@ -320,6 +338,13 @@ func (x *WatchDogCommonsImpl) Stop(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// stopRunCtx 取消看门狗生命周期 context，幂等
+func (x *WatchDogCommonsImpl) stopRunCtx() {
+	if x.runCancel != nil {
+		x.runCancel()
+	}
 }
 
 // SetEvent 允许在创建后更改日志源
