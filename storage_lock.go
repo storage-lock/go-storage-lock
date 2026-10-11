@@ -29,8 +29,24 @@ type StorageLock struct {
 	// 保护 storageLockWatchDog 的读写，防止 Lock 和 UnLock 并发操作时产生数据竞争
 	watchDogMu sync.Mutex
 
+	// subscribeMu 保护 subscribers 的读写，防止并发操作时产生数据竞争
+	subscribeMu sync.Mutex
+
+	// subscribers 保存当前 StorageLock 持有的订阅者；按 lockId 分组。
+	// 每次锁状态变化时，会向该 lockId 对应的所有 channel 推送最新的 LockInformation。
+	subscribers map[string][]chan *go_storage.LockInformation
+
+	// watchCancels 保存当前正在为某个 lockId 转发存储原生 Watch 通知的后台协程的取消函数。
+	// 受 subscribeMu 保护，与 subscribers 生命周期一致：第一个订阅者到来时启动，最后一个
+	// 订阅者取消订阅时停止，见 storage_lock_subscribe.go。
+	watchCancels map[string]context.CancelFunc
+
 	// 做一些ID自动生成的工作
 	ownerIdGenerator *OwnerIdGenerator
+
+	// ownershipLost 在看门狗确认持有权丢失时关闭，用来取消仍在运行的业务回调。
+	// 正常解锁不会关闭它。每次成功获取独占锁时重新创建。
+	ownershipLost chan struct{}
 }
 
 // LockIdPrefix 自动生成的锁的ID的前缀，但是不建议使用自动生成的锁ID
@@ -46,6 +62,16 @@ func NewStorageLock(storage go_storage.Storage, lockId string) (*StorageLock, er
 // storage: 锁持久化的存储介质，不同的介质有不同的实现，比如基于Mysql、基于MongoDB
 // options: 创建和维护锁时的相关配置项
 func NewStorageLockWithOptions(storage go_storage.Storage, options *StorageLockOptions) (*StorageLock, error) {
+	if storage == nil {
+		return nil, ErrStorageNil
+	}
+	if options == nil {
+		return nil, ErrInvalidOptions
+	}
+	// 保存独立配置，避免调用方复用 options 创建其他锁时更改正在运行的锁。
+	optionsCopy := *options
+	optionsCopy.EventListeners = append([]events.Listener(nil), options.EventListeners...)
+	options = &optionsCopy
 
 	// 参数检查
 	if err := checkStorageLockOptions(options); err != nil {
@@ -87,6 +113,17 @@ func NewStorageLockWithOptions(storage go_storage.Storage, options *StorageLockO
 	e.Publish(ctx)
 
 	return lock, nil
+}
+
+// SetFair 打开或关闭跨进程的先来先服务排队。
+// 测试框架要用它把工厂统一创建的锁切到公平模式；业务代码应在创建锁时通过选项设置。
+func (x *StorageLock) SetFair(fair bool) {
+	x.options.Fair = fair
+}
+
+// NewOwnerId 返回一个新的全局唯一持有者标识，供并发测试给每个竞争者分配身份。
+func (x *StorageLock) NewOwnerId() string {
+	return x.ownerIdGenerator.GenOwnerId()
 }
 
 // getTime 获取用于租约计算的时间
@@ -133,7 +170,6 @@ func (x *StorageLock) getLockInformation(ctx context.Context, e *events.Event, l
 		e.Fork().AddAction(events.NewAction(ActionLockNotFoundError).AddPayload(storage_events.PayloadLockId, lockId)).Publish(ctx)
 		return nil, ErrLockNotFound
 	}
-
 	// 触发查询成功的事件
 	action := events.NewAction(storage_events.ActionStorageGetSuccess).
 		AddPayload(storage_events.PayloadLockId, lockId).
@@ -168,3 +204,47 @@ func (x *StorageLock) setWatchDog(watchDog WatchDog) {
 }
 
 // ------------------------------------------------- --------------------------------------------------------------------
+
+const (
+	waiterModeRead  = "read"
+	waiterModeWrite = "write"
+)
+
+// lostChannel 返回当前持有权丢失信号。通道关闭表示看门狗确认租约已经不属于持有者。
+func (x *StorageLock) lostChannel() <-chan struct{} {
+	x.watchDogMu.Lock()
+	defer x.watchDogMu.Unlock()
+	if x.ownershipLost == nil {
+		x.ownershipLost = make(chan struct{})
+	}
+	return x.ownershipLost
+}
+
+// resetOwnershipLost 在新一次成功持有后重置丢失信号。
+func (x *StorageLock) resetOwnershipLost() {
+	x.watchDogMu.Lock()
+	defer x.watchDogMu.Unlock()
+	if x.ownershipLost == nil {
+		x.ownershipLost = make(chan struct{})
+		return
+	}
+	select {
+	case <-x.ownershipLost:
+		x.ownershipLost = make(chan struct{})
+	default:
+	}
+}
+
+// signalOwnershipLost 关闭丢失信号，幂等。
+func (x *StorageLock) signalOwnershipLost() {
+	x.watchDogMu.Lock()
+	defer x.watchDogMu.Unlock()
+	if x.ownershipLost == nil {
+		return
+	}
+	select {
+	case <-x.ownershipLost:
+	default:
+		close(x.ownershipLost)
+	}
+}

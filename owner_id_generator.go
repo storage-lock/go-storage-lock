@@ -11,6 +11,11 @@ import (
 	"strings"
 )
 
+var (
+	listNetworkInterfaces = net.Interfaces
+	currentHostname       = os.Hostname
+)
+
 // OwnerIdGenerator 可以使用这个工具类来生成全局唯一的OwnerID
 // 1. 要满足全局唯一不重复
 // 2. 可读性尽量好一些
@@ -48,7 +53,7 @@ func (x *OwnerIdGenerator) GenOwnerId() string {
 
 // 获取当前机器的Hostname作为唯一ID的前缀
 func generateMachineDefaultLockIdPrefix() string {
-	netInterfaces, err := net.Interfaces()
+	netInterfaces, err := listNetworkInterfaces()
 	if err != nil {
 		return ""
 	}
@@ -57,7 +62,7 @@ func generateMachineDefaultLockIdPrefix() string {
 	parts = append(parts, "storage-lock-owner-id")
 
 	// 主机名
-	hostname, _ := os.Hostname()
+	hostname, _ := currentHostname()
 	if hostname != "" {
 		parts = append(parts, hostname)
 	}

@@ -1,1 +1,4 @@
-.idea
+.ideacoverage.out
+coverage*.out
+coverage.html
+COVERAGE_*.md

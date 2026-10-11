@@ -6,7 +6,6 @@ import (
 	"github.com/storage-lock/go-events"
 	"github.com/storage-lock/go-storage"
 	storage_events "github.com/storage-lock/go-storage-events"
-	"time"
 )
 
 // StorageLock中与释放锁相关的逻辑拆分到这个文件中，以防止逻辑都放在一个文件中内容太长不好管理
@@ -14,6 +13,9 @@ import (
 // UnLock 尝试释放锁，如果释放不成功的话则会返回error
 // ownerId: 是谁在尝试释放锁，必须与 Lock 时使用的 ownerId 相同，否则会返回 ErrLockNotBelongYou
 func (x *StorageLock) UnLock(ctx context.Context, ownerId string) error {
+	if err := validateOwner(ctx, ownerId); err != nil {
+		return err
+	}
 
 	lockId := x.options.LockId
 	e := events.NewEvent(lockId).SetType(events.EventTypeUnlock).SetStorageName(x.storage.GetName()).SetListeners(x.options.EventListeners).SetOwnerId(ownerId)
@@ -45,21 +47,19 @@ func (x *StorageLock) UnLock(ctx context.Context, ownerId string) error {
 		// 休眠一会儿再开始重试
 		sleepDuration := x.options.VersionMissRetryInterval + x.retryIntervalRandomBase()
 		e.Fork().AddAction(events.NewAction(ActionSleep).AddPayload(PayloadSleep, sleepDuration)).Publish(ctx)
-		time.Sleep(sleepDuration)
-
-		select {
-		case <-ctx.Done():
+		if err := waitContext(ctx, sleepDuration); err != nil {
 			e.Fork().AddAction(events.NewAction(ActionTimeout).AddPayload(PayloadVersionMissCount, versionMissCount)).Publish(ctx)
 			return err
-		default:
-			e.Fork().AddAction(events.NewAction(ActionSleepRetry).AddPayload(PayloadVersionMissCount, versionMissCount)).Publish(ctx)
-			continue
 		}
+		e.Fork().AddAction(events.NewAction(ActionSleepRetry).AddPayload(PayloadVersionMissCount, versionMissCount)).Publish(ctx)
 	}
 }
 
 // tryUnlock 尝试释放掉锁
 func (x *StorageLock) tryUnlock(ctx context.Context, e *events.Event, lockId, ownerId string) error {
+	if err := validateOwner(ctx, ownerId); err != nil {
+		return err
+	}
 
 	// 设置事件的上下文并发送开始事件
 	e.SetLockId(lockId).SetOwnerId(ownerId).AddActionByName(ActionUnlock).Publish(ctx)
@@ -81,21 +81,27 @@ func (x *StorageLock) tryUnlock(ctx context.Context, e *events.Event, lockId, ow
 	}
 
 	// 如果锁的当前持有者的ID不是自己，则无权释放锁
-	if lockInformation.OwnerId != ownerId {
+	if err := checkExclusiveOwner(lockInformation, ownerId); err != nil {
 		e.Fork().AddActionByName(ActionNotLockOwner).Publish(ctx)
-		return ErrLockNotBelongYou
+		return err
+	}
+	if _, err := x.activeLeaseExpiry(ctx, e.Fork(), lockInformation); err != nil {
+		return err
 	}
 
 	// 通过了前面的检查，确实锁是自己持有的，则开始对锁进行操作
 	lastVersion := lockInformation.Version
-	lockInformation.Version++
+	lockInformation.Version, err = nextVersion(lastVersion)
+	if err != nil {
+		return err
+	}
 	lockInformation.LockCount--
 
 	// 如果释放一次之后发现还没有释放干净，说明是重入锁，并且加锁次数还没有为0，则尝试更新锁的信息
 	if lockInformation.LockCount > 0 {
 		return x.unlockReentry(ctx, e.Fork(), lockId, ownerId, lockInformation, lastVersion)
 	} else {
-		// 如果经过这次操作之后锁的锁的锁定次数为0，说明应该彻底释放掉这个锁了，将其从Storage中清除
+		// 重入深度归零，保留版本记录并标记为已释放。
 		return x.unlockRelease(ctx, e.Fork(), lockId, ownerId, lockInformation, lastVersion)
 	}
 }
@@ -114,7 +120,7 @@ func (x *StorageLock) unlockReentry(ctx context.Context, e *events.Event, lockId
 	e.Fork().AddAction(unlockReentryAction).Publish(ctx)
 
 	// 获取锁的过期时间
-	expireTime, err := x.getLeaseExpireTime(ctx, e.Fork())
+	expireTime, err := x.activeLeaseExpiry(ctx, e.Fork(), lockInformation)
 	if err != nil {
 		e.Fork().AddAction(events.NewAction(ActionGetLeaseExpireTimeError).SetErr(err)).Publish(ctx)
 		return err
@@ -133,17 +139,18 @@ func (x *StorageLock) unlockReentry(ctx context.Context, e *events.Event, lockId
 		}
 	} else {
 		e.Fork().AddActionByName(storage_events.ActionStorageUpdateWithVersionSuccess).Publish(ctx)
+		x.notifySubscribers(lockId, lockInformation)
 		return nil
 	}
 }
 
-// 锁被彻底释放干净了，将其从Storage中删除，这样下一个获取锁的人就能走 CreateWithVersion 路径
+// 重入深度归零，通过 CAS 保留版本记录并标记为已释放。
 // ctx: 可以用作一些超时控制之类的
 // e: 事件流推送
 // lockId: 解锁的是哪个锁
 // ownerId: 当前是谁在尝试释放锁
-// lockInformation: 锁的信息，用于传递给 DeleteWithVersion 作为条件校验
-// lastVersion: CAS时期望的锁的最新版本，如果不是的话会删除失败
+// lockInformation: 锁的信息
+// lastVersion: CAS 时期望的锁的最新版本
 func (x *StorageLock) unlockRelease(ctx context.Context, e *events.Event, lockId, ownerId string, lockInformation *storage.LockInformation, lastVersion storage.Version) error {
 
 	// 更新事件的上下文
@@ -155,47 +162,23 @@ func (x *StorageLock) unlockRelease(ctx context.Context, e *events.Event, lockId
 		AddPayload(storage_events.PayloadLockInformation, lockInformation)
 	e.AddAction(unlockReleaseAction).Publish(ctx)
 
-	// 先停止看门狗，再删除锁记录
-	// 这非常重要：如果先 DeleteWithVersion 再 stopWatchDog，那么在 DeleteWithVersion 因版本 miss 重试期间，
-	// 看门狗仍在持续续租推进版本号，与 UnLock 形成竞争，导致 UnLock 无限重试（活锁）。
-	// 先停看门狗可让版本号稳定下来，DeleteWithVersion 才能成功。
+	// 先停止续租，避免看门狗与释放操作反复竞争 CAS。
 	x.stopWatchDog(ctx, e, lockInformation)
 
-	// 释放路径分两种：
-	//   - 存储支持原子条件删除（CapabilityAtomicDelete）：用 DeleteWithVersion 真正删除记录，
-	//     下次获取锁走 lockNotExists → CreateWithVersion，语义最清晰
-	//   - 存储不支持原子条件删除（如对象存储只有条件 PUT 没有条件 DELETE）：
-	//     降级为 UpdateWithVersion 写入"墓碑"标记（LockCount=0），记录保留但逻辑上已释放，
-	//     下次获取锁走 lockExists → 识别 LockCount==0 → lockExpired 抢占路径。
-	//     互斥性不受影响——墓碑写入本身就是一次 UpdateWithVersion 的原子 CAS。
-	if storage.SupportsAtomicDelete(x.storage) {
-		return x.unlockReleaseByDelete(ctx, e, lockId, ownerId, lockInformation, lastVersion)
-	}
+	// 所有后端都保留版本；删除后重新从 1 开始会复用栅栏令牌并产生 ABA。
 	return x.unlockReleaseByTombstone(ctx, e, lockId, ownerId, lockInformation, lastVersion)
 }
 
-// unlockReleaseByDelete 通过 DeleteWithVersion 真正删除锁记录（存储支持原子条件删除时）
-func (x *StorageLock) unlockReleaseByDelete(ctx context.Context, e *events.Event, lockId, ownerId string, lockInformation *storage.LockInformation, lastVersion storage.Version) error {
-	err := x.storageExecutor.DeleteWithVersion(ctx, e, lockId, lastVersion, lockInformation)
-	if err != nil {
-		if errors.Is(err, ErrVersionMiss) {
-			e.Fork().AddAction(events.NewAction(storage_events.ActionStorageDeleteWithVersionMiss).SetErr(err)).Publish(ctx)
-			return ErrVersionMiss
-		} else {
-			e.Fork().AddAction(events.NewAction(storage_events.ActionStorageDeleteWithVersionError).SetErr(err)).Publish(ctx)
-			return err
-		}
-	}
-	e.Fork().AddAction(events.NewAction(storage_events.ActionStorageDeleteWithVersionSuccess)).Publish(ctx)
-	return nil
-}
-
-// unlockReleaseByTombstone 通过 UpdateWithVersion 写入墓碑标记释放锁（存储不支持原子条件删除时）
-// 墓碑 = LockCount 置 0、LeaseExpireTime 设为当前时间（立即失效），记录保留但逻辑已释放。
+// unlockReleaseByTombstone 通过 UpdateWithVersion 写入墓碑标记释放锁。
+// 墓碑 = LockCount 置 0、LeaseExpireTime 设为当前时间（立即失效），记录保留但逻辑上已释放。
 // 下次获取锁时 lockExists 识别 LockCount==0 走抢占路径。
 func (x *StorageLock) unlockReleaseByTombstone(ctx context.Context, e *events.Event, lockId, ownerId string, lockInformation *storage.LockInformation, lastVersion storage.Version) error {
 	// 构造墓碑：版本号 +1，LockCount=0，租约立即过期
-	lockInformation.Version = lastVersion + 1
+	next, err := nextVersion(lastVersion)
+	if err != nil {
+		return err
+	}
+	lockInformation.Version = next
 	lockInformation.LockCount = 0
 	now, err := x.getTime(ctx, e.Fork())
 	if err != nil {
@@ -215,5 +198,6 @@ func (x *StorageLock) unlockReleaseByTombstone(ctx context.Context, e *events.Ev
 		}
 	}
 	e.Fork().AddActionByName(storage_events.ActionStorageUpdateWithVersionSuccess).Publish(ctx)
+	x.notifySubscribers(lockId, lockInformation)
 	return nil
 }

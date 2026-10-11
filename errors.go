@@ -4,13 +4,23 @@ import "errors"
 
 // ErrLockIdEmpty 参数相关的参数检查
 var (
+	ErrOwnerIdEmpty         = errors.New("owner id can not be empty")
+	ErrInvalidOptions       = errors.New("invalid storage lock options")
+	ErrStorageNil           = errors.New("storage can not be nil")
+	ErrCallbackNil          = errors.New("lock callback can not be nil")
+	ErrRetryInterval        = errors.New("VersionMissRetryInterval must not be negative")
+	ErrUnlockTimeout        = errors.New("UnlockTimeout must not be negative")
+	ErrLeaseExpired         = errors.New("lock lease expired")
+	ErrVersionExhausted     = errors.New("lock version exhausted")
 	ErrLockIdEmpty          = errors.New("lock id can not empty")
 	ErrLeaseExpireAfter     = errors.New("LeaseExpireAfter must > time.Second * 3 ")
-	ErrLeaseRefreshInterval = errors.New("LeaseRefreshInterval must < ErrLeaseExpireAfter ")
+	ErrLeaseRefreshInterval = errors.New("LeaseRefreshInterval must be positive and less than LeaseExpireAfter")
 	// ErrLeaseRefreshIntervalTooClose 续租刷新间隔与租约过期时间过于接近。
 	// 若 LeaseExpireAfter - LeaseRefreshInterval 的余量过小，一次续租的网络抖动/存储延迟
 	// 就可能让租约在下一次刷新完成前过期，被他人合法抢占，破坏互斥性（漏洞 I）。
 	ErrLeaseRefreshIntervalTooClose = errors.New("LeaseRefreshInterval too close to LeaseExpireAfter, leave enough margin for renewal jitter")
+	// ErrMaxReentrantDepth 可重入深度达到上限。零表示不限制。
+	ErrMaxReentrantDepth = errors.New("lock reentrant depth exceeded")
 )
 
 var (
@@ -35,6 +45,13 @@ var (
 
 	// ErrLockRefreshFailed 刷新锁的过期时间时出错
 	ErrLockRefreshFailed = errors.New("lock refresh failed")
+
+	// ErrUpgradeConflict 读锁升级时还有其他读者，升级被拒绝，原读锁保持不变。
+	ErrUpgradeConflict = errors.New("read lock upgrade conflicts with other readers")
+
+	// ErrNotYourTurn 公平锁的排队顺序还没轮到这个持有者。
+	// 锁空闲不等于可以获取，排在前面的等待者退出之前都会返回这个错误。
+	ErrNotYourTurn = errors.New("fair lock queue has not reached this owner")
 )
 
 var (

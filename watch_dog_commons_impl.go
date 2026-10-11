@@ -138,10 +138,8 @@ func (x *WatchDogCommonsImpl) Start(ctx context.Context) error {
 		// 使用 select 监听 stop channel，使 Stop 能立即唤醒此 sleep，避免 UnLock 阻塞
 		select {
 		case <-x.stop:
-			// Stop 已经被调用，直接退出
 			return
 		case <-time.After(needSleep):
-			// 正常唤醒，继续刷新
 		}
 
 		for x.isRunning.Load() {
@@ -159,12 +157,14 @@ func (x *WatchDogCommonsImpl) Start(ctx context.Context) error {
 				continueErrorCount++
 
 				// 如果锁已经不是自己持有了，则退出
-				if errors.Is(err, ErrLockNotBelongYou) {
+				if errors.Is(err, ErrLockNotBelongYou) || errors.Is(err, ErrLeaseExpired) || errors.Is(err, ErrLockNotFound) {
 					notLockOwnerAction := events.NewAction(ActionNotLockOwner).
 						AddPayload(PayloadContinueErrorCount, continueErrorCount).
 						AddPayload(PayloadRefreshSuccessCount, refreshSuccessCount).
 						SetErr(err)
 					x.e.Load().Fork().AddAction(notLockOwnerAction).Publish(context.Background())
+					x.storageLock.signalOwnershipLost()
+					x.notifyLockLost(err)
 					return
 				}
 
@@ -239,7 +239,8 @@ func (x *WatchDogCommonsImpl) refreshLeaseExpiredTime() error {
 	// 子 ctx 从 runCtx 派生：既带 LeaseRefreshInterval 超时，又随看门狗 Stop 而取消。
 	// 这样 Stop 调用 runCancel 时，卡在 getLockInformation/UpdateWithVersion 等存储 RPC 里的
 	// goroutine 会立即收到取消信号返回，而不必干等子 ctx 自然超时（问题3 修复）。
-	ctx, cancelFunc := context.WithTimeout(x.runCtx, x.storageLock.options.LeaseRefreshInterval)
+	// 带上看门狗标记，让存储和时间源能区分"看门狗的调用"和"调用方自己的调用"。
+	ctx, cancelFunc := context.WithTimeout(context.WithValue(x.runCtx, watchdogContextKey{}, struct{}{}), x.storageLock.options.LeaseRefreshInterval)
 	defer cancelFunc()
 
 	// 查询锁的当前状态
@@ -270,6 +271,17 @@ func (x *WatchDogCommonsImpl) refreshLeaseExpiredTime() error {
 			Publish(ctx)
 		return ErrLockNotBelongYou
 	}
+	if information.LockCount == 0 {
+		refreshEvent.AddAction(events.NewAction(ActionLockNotFoundError).SetErr(ErrLeaseExpired)).Publish(ctx)
+		x.stopInternal()
+		return ErrLeaseExpired
+	}
+
+	if _, err := x.storageLock.activeLeaseExpiry(ctx, refreshEvent.Fork(), information); err != nil {
+		refreshEvent.AddAction(events.NewAction(ActionWatchDogStop).SetErr(err)).Publish(ctx)
+		x.stopInternal()
+		return err
+	}
 
 	// 计算租约续租之后的过期时间，这里计算的时候需要使用到Storage中统一时间源
 	expireTime, err := x.storageLock.getLeaseExpireTime(ctx, refreshEvent.Fork())
@@ -281,7 +293,13 @@ func (x *WatchDogCommonsImpl) refreshLeaseExpiredTime() error {
 
 	// 续租算作是一次修改，所以版本号要加一
 	lastVersion := information.Version
-	information.Version++
+	nextVersion, err := nextVersion(lastVersion)
+	if err != nil {
+		refreshEvent.AddAction(events.NewAction(ActionWatchDogStop).SetErr(err)).Publish(ctx)
+		x.stopInternal()
+		return err
+	}
+	information.Version = nextVersion
 
 	// 尝试更新Storage中存储的锁的信息
 	err = x.storageLock.storageExecutor.UpdateWithVersion(ctx, refreshEvent.Fork(), x.lockId, lastVersion, information.Version, information)
@@ -302,6 +320,16 @@ func (x *WatchDogCommonsImpl) refreshLeaseExpiredTime() error {
 
 	refreshEvent.Publish(ctx)
 	return err
+}
+
+// notifyLockLost 把确认后的持有权丢失通知给调用方。回调 panic 不能拖垮看门狗。
+func (x *WatchDogCommonsImpl) notifyLockLost(err error) {
+	callback := x.storageLock.options.OnLockLost
+	if callback == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	callback(err)
 }
 
 // stopInternal 在 goroutine 内部调用，只设置停止标志并 close stop，
@@ -357,4 +385,17 @@ func (x *WatchDogCommonsImpl) SetEvent(e *events.Event) {
 	ctx, cancelFunc := context.WithTimeout(context.Background(), time.Minute*5)
 	defer cancelFunc()
 	x.e.Load().AddAction(events.NewAction(ActionWatchDogSetEvent)).Publish(ctx)
+}
+
+// watchdogContextKey 标记一个 context 来自看门狗的续租。
+// 存储和时间源用它区分看门狗发起的调用和业务方自己的调用。
+type watchdogContextKey struct{}
+
+// IsWatchDogContext 报告 ctx 是否由看门狗的续租派生。
+func IsWatchDogContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	_, ok := ctx.Value(watchdogContextKey{}).(struct{})
+	return ok
 }

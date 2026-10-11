@@ -12,10 +12,10 @@ import (
 // 不能返回负值或过小值，否则 time.After(负) 立即触发，看门狗无间隔疯狂重试打爆存储。
 func TestComputeRefreshSleepDurationLowerBound(t *testing.T) {
 	cases := []struct {
-		name           string
-		refresh        time.Duration // 模拟一次刷新的耗时
-		interval       time.Duration // LeaseRefreshInterval
-		wantAtLeast    time.Duration // 期望 sleep 不低于此值
+		name        string
+		refresh     time.Duration // 模拟一次刷新的耗时
+		interval    time.Duration // LeaseRefreshInterval
+		wantAtLeast time.Duration // 期望 sleep 不低于此值
 	}{
 		{"刷新快于间隔-正常", 10 * time.Millisecond, time.Second, 500 * time.Millisecond}, // 半间隔
 		{"刷新等于间隔-临界", time.Second, time.Second, 500 * time.Millisecond},

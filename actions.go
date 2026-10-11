@@ -82,3 +82,30 @@ const (
 	PayloadRefreshSuccessCount = "refreshSuccessCount"
 	PayloadContinueErrorCount  = "continueErrorCount"
 )
+
+// 读写锁相关的事件
+const (
+	ActionRLockBegin       = "StorageLock.RLock.Begin"
+	ActionRLockSuccess     = "StorageLock.RLock.Success"
+	ActionRLockError       = "StorageLock.RLock.Error"
+	ActionRLockVersionMiss = "StorageLock.RLock.VersionMiss"
+	ActionRLockBusy        = "StorageLock.RLock.Busy"
+
+	ActionRUnlockBegin       = "StorageLock.RUnlock.Begin"
+	ActionRUnlockSuccess     = "StorageLock.RUnlock.Success"
+	ActionRUnlockError       = "StorageLock.RUnlock.Error"
+	ActionRUnlockVersionMiss = "StorageLock.RUnlock.VersionMiss"
+	ActionRUnlockRelease     = "StorageLock.RUnlock.Release"
+
+	ActionWLockBegin   = "StorageLock.WLock.Begin"
+	ActionWLockSuccess = "StorageLock.WLock.Success"
+	ActionWLockError   = "StorageLock.WLock.Error"
+
+	ActionWUnlockBegin   = "StorageLock.WUnlock.Begin"
+	ActionWUnlockSuccess = "StorageLock.WUnlock.Success"
+	ActionWUnlockError   = "StorageLock.WUnlock.Error"
+
+	ActionUpgradeBegin   = "StorageLock.Upgrade.Begin"
+	ActionUpgradeSuccess = "StorageLock.Upgrade.Success"
+	ActionUpgradeError   = "StorageLock.Upgrade.Error"
+)

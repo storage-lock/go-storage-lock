@@ -1,8 +1,8 @@
 package storage_lock
 
 import (
-	go_storage "github.com/storage-lock/go-storage"
 	"github.com/storage-lock/go-events"
+	go_storage "github.com/storage-lock/go-storage"
 	"time"
 )
 
@@ -21,10 +21,25 @@ var (
 
 	// DefaultVersionMissRetryInterval 版本miss时间隔多久再重试
 	DefaultVersionMissRetryInterval = time.Second
+
+	// DefaultUnlockTimeout 是 WithLock 和获取失败回滚时独立清理上下文的超时时间。
+	DefaultUnlockTimeout = 5 * time.Second
 )
 
 // 检查参数配置是否正确
 func checkStorageLockOptions(options *StorageLockOptions) error {
+	if options == nil {
+		return ErrInvalidOptions
+	}
+	if options.VersionMissRetryInterval < 0 {
+		return ErrRetryInterval
+	}
+	if options.UnlockTimeout < 0 {
+		return ErrUnlockTimeout
+	}
+	if options.MaxReentrantDepth < 0 {
+		return ErrInvalidOptions
+	}
 
 	// 锁的ID不允许为空
 	if options.LockId == "" {
@@ -37,7 +52,7 @@ func checkStorageLockOptions(options *StorageLockOptions) error {
 	}
 
 	// 刷新间隔必须小于租约有效时间，不然租约都过期了再刷新还有个毛用啊
-	if options.LeaseRefreshInterval >= options.LeaseExpireAfter {
+	if !options.DisableWatchDog && (options.LeaseRefreshInterval <= 0 || options.LeaseRefreshInterval >= options.LeaseExpireAfter) {
 		return ErrLeaseRefreshInterval
 	}
 
@@ -52,7 +67,7 @@ func checkStorageLockOptions(options *StorageLockOptions) error {
 	if third := options.LeaseExpireAfter / 3; third > minMargin {
 		minMargin = third
 	}
-	if !options.SkipLeaseMarginCheck && margin < minMargin {
+	if !options.DisableWatchDog && !options.SkipLeaseMarginCheck && margin < minMargin {
 		return ErrLeaseRefreshIntervalTooClose
 	}
 
@@ -89,6 +104,15 @@ type StorageLockOptions struct {
 	// 用于创建看门狗
 	WatchDogFactory WatchDogFactory
 
+	// DisableWatchDog 关闭自动续租，用于固定租期或由调用方通过 Renew 手动续租。
+	// 默认 false；开启后，超过 LeaseExpireAfter 的任务需要自行续租。
+	DisableWatchDog bool
+
+	// UnlockTimeout 限制 WithLock 自动释放和获取失败回滚的清理时间。
+	// 清理使用独立于调用方取消信号的 context；零值使用 DefaultUnlockTimeout。
+	// 不改变显式 UnLock(ctx, ownerId) 的超时行为。
+	UnlockTimeout time.Duration
+
 	// 版本未命中时的重试间隔
 	VersionMissRetryInterval time.Duration
 
@@ -107,6 +131,22 @@ type StorageLockOptions struct {
 	// 或单进程无并发抢占风险时才跳过，自担风险。
 	SkipLeaseMarginCheck bool
 
+	// MaxReentrantDepth 限制同一持有者的可重入次数，零表示不限制。
+	// 达到上限后再次加锁返回 ErrMaxReentrantDepth，不会修改锁记录。
+	MaxReentrantDepth int
+
+	// Fair 开启跨进程的先来先服务。
+	// 等待者按登记顺序写进锁记录，只有排在最前的写者能把空闲或过期的锁拿走。
+	// 它不依赖任何进程内的队列，多个进程共用同一条存储记录就能排出同一个顺序。
+	// 代价是每次获取至少多一次 CAS，用来把自己登记进队列。
+	// 默认关闭，关闭时保持原有的谁先提交 CAS 谁拿到锁。
+	Fair bool
+
+	// OnLockLost 在看门狗确认持有权已经丢失时调用一次。
+	// 触发条件是租约过期、锁被他人接管或锁记录消失；正常 UnLock 不会触发。
+	// 回调不能阻塞，也不能在其中再次操作这把锁。
+	OnLockLost func(error)
+
 	// TimeProvider 外部注入的可靠时间源，用于弥补 Storage 自身没有服务端时钟的情况
 	// 例如对象存储（S3/OSS）、纯 HTTP 存储没有服务端时钟，无法自身满足 CapabilityReliableTime，
 	// 此时通过注入外部时间源（如 go-ntp-time-provider 提供的 NTP 时间源）来满足必要条件。
@@ -121,6 +161,7 @@ func NewStorageLockOptions() *StorageLockOptions {
 		LeaseExpireAfter:         DefaultLeaseExpireAfter,
 		LeaseRefreshInterval:     DefaultLeaseRefreshInterval,
 		VersionMissRetryInterval: DefaultVersionMissRetryInterval,
+		UnlockTimeout:            DefaultUnlockTimeout,
 	}
 }
 
@@ -179,5 +220,33 @@ func (x *StorageLockOptions) SetSkipLeaseMarginCheck(skip bool) *StorageLockOpti
 // 用于弥补 Storage 自身没有服务端时钟的情况（如对象存储、HTTP 存储）
 func (x *StorageLockOptions) SetTimeProvider(timeProvider go_storage.TimeProvider) *StorageLockOptions {
 	x.TimeProvider = timeProvider
+	return x
+}
+
+func (x *StorageLockOptions) SetDisableWatchDog(disable bool) *StorageLockOptions {
+	x.DisableWatchDog = disable
+	return x
+}
+
+func (x *StorageLockOptions) SetUnlockTimeout(timeout time.Duration) *StorageLockOptions {
+	x.UnlockTimeout = timeout
+	return x
+}
+
+// SetMaxReentrantDepth 设置同一持有者允许的最大重入深度，零表示不限制。
+func (x *StorageLockOptions) SetMaxReentrantDepth(depth int) *StorageLockOptions {
+	x.MaxReentrantDepth = depth
+	return x
+}
+
+// SetFair 打开或关闭跨进程的先来先服务排队。
+func (x *StorageLockOptions) SetFair(fair bool) *StorageLockOptions {
+	x.Fair = fair
+	return x
+}
+
+// SetOnLockLost 设置持有权丢失回调。nil 表示不通知。
+func (x *StorageLockOptions) SetOnLockLost(callback func(error)) *StorageLockOptions {
+	x.OnLockLost = callback
 	return x
 }
