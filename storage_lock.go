@@ -178,22 +178,30 @@ func (x *StorageLock) getLockInformation(ctx context.Context, e *events.Event, l
 	return go_storage.LockInformationFromJsonString(lockInformationJsonString)
 }
 
-// stopWatchDog 停止看门狗协程并清空引用，带互斥锁保护
+// stopWatchDog 停止看门狗协程并清空引用。
+//
+// ⚠️ 死锁修复：不能在持有 watchDogMu 的临界区内调用 WatchDog.Stop()。
+// Stop() 会等待看门狗协程通过 done channel 确认退出，而看门狗退出路径上
+// （refresh 发现锁已不属于持有者）会调用 signalOwnershipLost() 反手需要
+// 同一把 watchDogMu —— 主协程持锁等退出、看门狗等锁完成丢失通知，互相等待。
+// 因此这里先在锁内摘除引用，释放锁后再执行 Stop()，让看门狗能拿到锁收尾退出。
 func (x *StorageLock) stopWatchDog(ctx context.Context, e *events.Event, lockInformation *go_storage.LockInformation) {
 	x.watchDogMu.Lock()
-	defer x.watchDogMu.Unlock()
+	watchDog := x.storageLockWatchDog
+	x.storageLockWatchDog = nil
+	x.watchDogMu.Unlock()
 
-	if x.storageLockWatchDog != nil {
-		stopLastWatchDogEvent := e.Fork().SetLockInformation(lockInformation).AddActionByName(ActionWatchDogStop).SetWatchDogId(x.storageLockWatchDog.GetID())
-		err := x.storageLockWatchDog.Stop(ctx)
-		x.storageLockWatchDog = nil
-		if err != nil {
-			stopLastWatchDogEvent.AddAction(events.NewAction(ActionWatchDogStopError).SetErr(err))
-		} else {
-			stopLastWatchDogEvent.AddAction(events.NewAction(ActionWatchDogStopSuccess))
-		}
-		stopLastWatchDogEvent.Publish(ctx)
+	if watchDog == nil {
+		return
 	}
+	stopLastWatchDogEvent := e.Fork().SetLockInformation(lockInformation).AddActionByName(ActionWatchDogStop).SetWatchDogId(watchDog.GetID())
+	err := watchDog.Stop(ctx)
+	if err != nil {
+		stopLastWatchDogEvent.AddAction(events.NewAction(ActionWatchDogStopError).SetErr(err))
+	} else {
+		stopLastWatchDogEvent.AddAction(events.NewAction(ActionWatchDogStopSuccess))
+	}
+	stopLastWatchDogEvent.Publish(ctx)
 }
 
 // setWatchDog 设置看门狗，带互斥锁保护

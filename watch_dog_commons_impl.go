@@ -164,6 +164,7 @@ func (x *WatchDogCommonsImpl) Start(ctx context.Context) error {
 						SetErr(err)
 					x.e.Load().Fork().AddAction(notLockOwnerAction).Publish(context.Background())
 					x.storageLock.signalOwnershipLost()
+					x.storageLock.publishLost(context.Background(), x.ownerId)
 					x.notifyLockLost(err)
 					return
 				}
@@ -307,6 +308,7 @@ func (x *WatchDogCommonsImpl) refreshLeaseExpiredTime() error {
 		refreshEvent.AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersion + "-error").SetErr(err))
 	} else {
 		refreshEvent.AddAction(events.NewAction(storage_events.ActionStorageUpdateWithVersion + "-success"))
+		x.storageLock.publishRenewed(ctx, x.ownerId)
 		// 这里不再做"续租后再次 Get 校验 OwnerId"的防御性检查，原因如下：
 		// UpdateWithVersion 是原子的 CAS：仅当存储中当前版本 == lastVersion 时才会写入成功，
 		// 而能拿到 lastVersion 说明上一步 Get 时锁还是自己的。若在 Get 与 UpdateWithVersion 之间

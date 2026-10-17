@@ -168,7 +168,6 @@ func (m *mockSubscribeTimeProvider) Advance(d time.Duration) {
 	defer m.mu.Unlock()
 	m.now = m.now.Add(d)
 }
-
 // testSubscribeStorageLock 用 mock 存储创建用于订阅测试的 StorageLock。
 func testSubscribeStorageLock(t *testing.T, lockId string) (*StorageLock, *mockSubscribeStorage, *mockSubscribeTimeProvider) {
 	t.Helper()

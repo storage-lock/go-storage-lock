@@ -142,6 +142,7 @@ func (x *StorageLock) renewOnce(ctx context.Context, e *events.Event, ownerId st
 		return err
 	}
 	x.notifySubscribers(x.options.LockId, info)
+	x.publishRenewed(ctx, ownerId)
 	return nil
 }
 

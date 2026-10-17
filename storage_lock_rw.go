@@ -531,6 +531,7 @@ func (x *StorageLock) abandonWait(ownerId, mode string) {
 		info.WriteIntentSince = intentSince
 		if err := x.storageExecutor.UpdateWithVersion(ctx, e.Fork(), x.options.LockId, oldVersion, next, info); err == nil {
 			x.notifySubscribers(x.options.LockId, info)
+			x.publishWaitChanged(ctx, ownerId)
 			return
 		}
 	}
@@ -559,6 +560,7 @@ func (x *StorageLock) ensureFairQueued(ctx context.Context, ownerId string) erro
 			err = x.storageExecutor.CreateWithVersion(ctx, e.Fork(), x.options.LockId, placeholder.Version, placeholder)
 			if err == nil {
 				x.notifySubscribers(x.options.LockId, placeholder)
+				x.publishWaitChanged(ctx, ownerId)
 				return nil
 			}
 			// 记录已经被别人创建出来了。LevelDB 这类存储把"已存在"报成版本冲突，
@@ -592,6 +594,7 @@ func (x *StorageLock) ensureFairQueued(ctx context.Context, ownerId string) erro
 		err = x.storageExecutor.UpdateWithVersion(ctx, e.Fork(), x.options.LockId, oldVersion, next, info)
 		if err == nil {
 			x.notifySubscribers(x.options.LockId, info)
+			x.publishWaitChanged(ctx, ownerId)
 			return nil
 		}
 		if errors.Is(err, ErrVersionMiss) {

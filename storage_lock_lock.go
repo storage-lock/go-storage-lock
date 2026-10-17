@@ -71,9 +71,11 @@ func (x *StorageLock) Lock(ctx context.Context, ownerId string) error {
 		} else if errors.Is(err, ErrLockBusy) {
 			// 锁被其它人持有着，勇敢牛牛，不怕困难，稍微一等，继续重试
 			lockBusyCount++
+			x.publishBusy(ctx, ownerId)
 			e.Fork().AddAction(events.NewAction(ActionLockBusy).AddPayload(PayloadVersionMissCount, versionMissCount).AddPayload(PayloadLockBusyCount, lockBusyCount)).Publish(ctx)
 		} else if errors.Is(err, ErrNotYourTurn) {
 			// 队列里还有人排在前面。继续等，但不算作锁被占用。
+			x.publishBusy(ctx, ownerId)
 			e.Fork().AddAction(events.NewAction(ActionLockBusy).AddPayload(PayloadVersionMissCount, versionMissCount).AddPayload(PayloadLockBusyCount, lockBusyCount)).Publish(ctx)
 		} else {
 			// 其它类型的错误就不再管了，认为是获取锁失败
@@ -116,6 +118,9 @@ func (x *StorageLock) TryLock(ctx context.Context, ownerId string) error {
 	if err == nil {
 		e.Fork().AddActionByName(ActionLockSuccess).Publish(ctx)
 	} else {
+		if errors.Is(err, ErrLockBusy) {
+			x.publishBusy(ctx, ownerId)
+		}
 		e.Fork().AddAction(events.NewAction(ActionLockError).SetErr(err)).Publish(ctx)
 	}
 	return err
@@ -173,6 +178,7 @@ func (x *StorageLock) lockExists(ctx context.Context, e *events.Event, lockId, o
 		return x.lockReentry(ctx, e.Fork(), lockId, ownerId, lockInformation)
 	} else {
 		// 锁被其他人占用着，暂时不能尝试获取锁
+		x.publishBusy(ctx, ownerId)
 		e.Fork().AddAction(events.NewAction(ActionLockBusy).AddPayload(storage_events.PayloadLockInformation, lockInformation)).Publish(ctx)
 		return ErrLockBusy
 	}
@@ -224,6 +230,7 @@ func (x *StorageLock) lockExpired(ctx context.Context, e *events.Event, lockId, 
 	// 抢占成功
 	e.Fork().AddActionByName(storage_events.ActionStorageUpdateWithVersionSuccess).Publish(ctx)
 	x.notifySubscribers(lockId, newLockInformation)
+	x.publishExpired(ctx, ownerId)
 	x.abandonWait(ownerId, waiterModeWrite)
 
 	// 抢占过期锁相当于新持有，需要启动新的看门狗来续租
