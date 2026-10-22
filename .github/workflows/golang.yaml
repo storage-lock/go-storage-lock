@@ -19,6 +19,7 @@ jobs:
         with:
           repository: storage-lock/go-events
           path: go-events
+          ref: main
 
       - name: Set up Go
         uses: actions/setup-go@v5
