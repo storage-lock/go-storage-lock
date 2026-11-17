@@ -91,6 +91,36 @@ func main() {
 }
 ```
 
+## 从 v0.0.x 升级到 v0.1.0
+
+v0.1.0 修了一个会让锁**静默失效**的正确性问题，并有三处破坏性签名变更。
+
+### 必须先升级的原因
+
+v0.0.6 / v0.0.7 的 `FairLock` 内部把 `fairlock-<lockId>` 当 owner，同一个 lockId 上
+所有客户端共用一个 owner。后果有两个：
+
+1. 第二个客户端 `TryLock` 会因为"同 owner 重入"直接成功——**两个进程可以同时持锁**；
+2. 一方 `UnLock` 会连带释放另一方持有的锁。
+
+升级前请先搜一遍代码里是否用了 `NewFairLock` 或 `NewFairStorageLock`。
+
+### 签名变更
+
+| 旧用法（v0.0.x） | 新用法（v0.1.0） |
+|---|---|
+| `fl.Lock(ctx)` | `fl.Lock(ctx, ownerId)` |
+| `fl.TryLock(ctx)` | `fl.TryLock(ctx, ownerId)` |
+| `fl.UnLock(ctx)` | `fl.UnLock(ctx, ownerId)` |
+| `storage_lock.NewMultiLock(l1, l2)` | `storage_lock.NewMultiLock(ownerId, l1, l2)` |
+| `storage_lock.NewFairStorageLock(...)` | `storage_lock.NewLocalOrderedLock(...)` |
+
+`FairStorageLock` 现在只是 `LocalOrderedLock` 的类型别名。注意它**只在本进程内排队**，
+不提供跨进程公平；需要跨进程顺序时用 `FairLock` 或 `StorageLockOptions{Fair: true}`。
+
+`ownerId` 由调用方自己负责：应当能区分不同客户端（例如 `NewOwnerId()` 或业务侧
+的机器名 + 进程号），不能用硬编码常量，否则又会退化成共用 owner。
+
 ## 相关模块
 
 | 模块 | 用途 |
