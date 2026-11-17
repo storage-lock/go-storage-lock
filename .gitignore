@@ -1,4 +1,5 @@
-.ideacoverage.out
+.idea
 coverage*.out
 coverage.html
 COVERAGE_*.md
+*.out
