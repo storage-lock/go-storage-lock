@@ -36,7 +36,7 @@ func (x *StorageLock) RLock(ctx context.Context, ownerId string) error {
 		}
 		sleepDuration := x.options.VersionMissRetryInterval + x.retryIntervalRandomBase()
 		e.Fork().AddAction(events.NewAction(ActionSleep).AddPayload(PayloadSleep, sleepDuration)).Publish(ctx)
-		if err := waitContext(ctx, sleepDuration); err != nil {
+		if err := x.waitForLockChange(ctx, sleepDuration); err != nil {
 			e.Fork().AddAction(events.NewAction(ActionTimeout)).Publish(ctx)
 			return err
 		}
@@ -54,10 +54,18 @@ func (x *StorageLock) tryRLock(ctx context.Context, e *events.Event, lockId, own
 	if lockInformation == nil {
 		return x.rlockCreate(ctx, e, lockId, ownerId)
 	}
+	if err := x.dropExpiredWaiters(ctx, e, lockInformation, time.Time{}); err != nil {
+		return err
+	}
 
 	if storageTime, err := x.getTime(ctx, e.Fork()); err != nil {
 		return err
-	} else if storageTime.After(lockInformation.LeaseExpireTime) || lockInformation.LockCount == 0 {
+	} else if !storageTime.Before(lockInformation.LeaseExpireTime) || lockInformation.LockCount == 0 {
+		// 恰好等于 LeaseExpireTime 与独占路径一样视为已过期。
+		// 这一刻不能沿重入把仍在的共享租约再推远；时间严格晚于到期点，或记录已是墓碑时，才抢占。
+		if lockInformation.LockCount > 0 && !storageTime.After(lockInformation.LeaseExpireTime) {
+			return ErrLeaseExpired
+		}
 		// 记录本身还存在（过期或者墓碑），只是逻辑上已失效，必须用 UpdateWithVersion 抢占，
 		// 不能走 rlockCreate 的 CreateWithVersion：对不支持原子删除的存储（如 MongoDB/S3
 		// 等墓碑释放路径），记录一直都在，CreateWithVersion 只会不断返回
@@ -68,8 +76,13 @@ func (x *StorageLock) tryRLock(ctx context.Context, e *events.Event, lockId, own
 
 	if lockInformation.ReadLock {
 		// 已有写者排队时，新读者不再进入，避免写饥饿。已经在读的 owner 仍可重入。
-		if lockInformation.WriteIntentOwner != "" && lockInformation.ReadDepth(ownerId) == 0 {
-			return ErrUpgradeConflict
+		if lockInformation.ReadDepth(ownerId) == 0 {
+			if lockInformation.WriteIntentOwner != "" {
+				return ErrUpgradeConflict
+			}
+			if firstWriteWaiter(lockInformation.Waiters) != nil {
+				return ErrNotYourTurn
+			}
 		}
 		return x.rlockReentry(ctx, e, lockId, ownerId, lockInformation)
 	}
@@ -81,7 +94,10 @@ func (x *StorageLock) tryRLock(ctx context.Context, e *events.Event, lockId, own
 // 与写锁的 lockExpired 对称：记录还在存储里，必须用 UpdateWithVersion 而不是
 // CreateWithVersion 去覆盖它。
 func (x *StorageLock) rlockReclaim(ctx context.Context, e *events.Event, lockId, ownerId string, storageTime time.Time, oldLockInformation *storage.LockInformation) error {
-	// 已有写者排队时，读者不能抢先把队列清掉。
+	// 写意图或写队列还在时，读者不能把这条记录清成自己的读锁。
+	if oldLockInformation.WriteIntentOwner != "" {
+		return ErrUpgradeConflict
+	}
 	if firstWriteWaiter(oldLockInformation.Waiters) != nil {
 		return ErrNotYourTurn
 	}
@@ -157,6 +173,12 @@ func (x *StorageLock) rlockReentry(ctx context.Context, e *events.Event, lockId,
 	if x.options.MaxReentrantDepth > 0 && lockInformation.ReadDepth(ownerId) >= x.options.MaxReentrantDepth {
 		return ErrMaxReentrantDepth
 	}
+	// 仍有效才重入。回拨或原租约更长时，新的到期时刻不得早于原值。
+	expireTime, err := x.activeLeaseExpiry(ctx, e.Fork(), lockInformation)
+	if err != nil {
+		e.Fork().AddAction(events.NewAction(ActionGetLeaseExpireTimeError).SetErr(err)).Publish(ctx)
+		return err
+	}
 	oldVersion := lockInformation.Version
 	newVersion, err := nextVersion(oldVersion)
 	if err != nil {
@@ -165,12 +187,6 @@ func (x *StorageLock) rlockReentry(ctx context.Context, e *events.Event, lockId,
 	lockInformation.Version = newVersion
 	lockInformation.AddReadOwner(ownerId)
 	lockInformation.Waiters = removeWaiter(lockInformation.Waiters, ownerId, waiterModeRead)
-
-	expireTime, err := x.getLeaseExpireTime(ctx, e.Fork())
-	if err != nil {
-		e.Fork().AddAction(events.NewAction(ActionGetLeaseExpireTimeError).SetErr(err)).Publish(ctx)
-		return err
-	}
 	lockInformation.LeaseExpireTime = expireTime
 
 	err = x.storageExecutor.UpdateWithVersion(ctx, e.Fork(), lockId, oldVersion, lockInformation.Version, lockInformation)
@@ -184,6 +200,11 @@ func (x *StorageLock) rlockReentry(ctx context.Context, e *events.Event, lockId,
 	}
 	e.Fork().AddActionByName(storage_events.ActionStorageUpdateWithVersionSuccess).Publish(ctx)
 	x.notifySubscribers(lockId, lockInformation)
+	// 后加入的读者使用自己的 StorageLock 实例。这个实例还没有看门狗时启动一只，
+	// 这样先加入者退出后，剩余持有者仍能续租。同一实例上已有的看门狗继续服务于原持有者。
+	if !x.hasWatchDog() {
+		return x.startWatchDog(ctx, e.Fork(), lockId, ownerId, lockInformation)
+	}
 	return nil
 }
 
@@ -237,26 +258,34 @@ func (x *StorageLock) tryRUnlock(ctx context.Context, e *events.Event, lockId, o
 		return ErrLockNotBelongYou
 	}
 	lastVersion := lockInformation.Version
-	newVersion, err := nextVersion(lastVersion)
+	// 唯一读者的最后一层会把 LockCount 降到 0，和还有其他读者时一样先确认租约。
+	// 恰好到期或时间源失败时直接返回：不停看门狗、不写少释放、也不写墓碑。
+	// 确认通过之后，仍有持有者时用不会更早的到期时刻少释放；降到 0 才走墓碑。
+	expires, err := x.activeLeaseExpiry(ctx, e.Fork(), lockInformation)
 	if err != nil {
+		e.Fork().AddAction(events.NewAction(ActionGetLeaseExpireTimeError).SetErr(err)).Publish(ctx)
 		return err
 	}
-	lockInformation.Version = newVersion
-
 	if lockInformation.LockCount > 0 {
+		newVersion, err := nextVersion(lastVersion)
+		if err != nil {
+			return err
+		}
+		lockInformation.Version = newVersion
+		lockInformation.LeaseExpireTime = expires
+		// 本持有者的最后一层已经从这份副本里去掉，其他读者还在。
+		// 确认可以写回之后再停掉本实例的看门狗，避免下一轮续租看到 ReadDepth==0 把正常释放报成持有丢失。
+		// 还有重入层时看门狗继续为剩余持有续租。
+		if lockInformation.ReadDepth(ownerId) <= 0 {
+			x.stopWatchDog(ctx, e, lockInformation)
+		}
 		return x.runlockReentry(ctx, e.Fork(), lockId, ownerId, lockInformation, lastVersion)
 	}
 	return x.runlockRelease(ctx, e.Fork(), lockId, ownerId, lockInformation, lastVersion)
 }
 
 func (x *StorageLock) runlockReentry(ctx context.Context, e *events.Event, lockId, ownerId string, lockInformation *storage.LockInformation, lastVersion storage.Version) error {
-	expireTime, err := x.getLeaseExpireTime(ctx, e.Fork())
-	if err != nil {
-		e.Fork().AddAction(events.NewAction(ActionGetLeaseExpireTimeError).SetErr(err)).Publish(ctx)
-		return err
-	}
-	lockInformation.LeaseExpireTime = expireTime
-	err = x.storageExecutor.UpdateWithVersion(ctx, e.Fork(), lockId, lastVersion, lockInformation.Version, lockInformation)
+	err := x.storageExecutor.UpdateWithVersion(ctx, e.Fork(), lockId, lastVersion, lockInformation.Version, lockInformation)
 	if err != nil {
 		if errors.Is(err, ErrVersionMiss) {
 			e.Fork().AddActionByName(storage_events.ActionStorageUpdateWithVersionMiss).Publish(ctx)
@@ -275,12 +304,15 @@ func (x *StorageLock) runlockRelease(ctx context.Context, e *events.Event, lockI
 	x.stopWatchDog(ctx, e, lockInformation)
 
 	tombstone := &storage.LockInformation{
-		LockId:          lockInformation.LockId,
-		Version:         0,
-		LockCount:       0,
-		LockBeginTime:   lockInformation.LockBeginTime,
-		LeaseExpireTime: lockInformation.LeaseExpireTime,
-		ReadLock:        lockInformation.ReadLock,
+		LockId:           lockInformation.LockId,
+		Version:          0,
+		LockCount:        0,
+		LockBeginTime:    lockInformation.LockBeginTime,
+		LeaseExpireTime:  lockInformation.LeaseExpireTime,
+		ReadLock:         lockInformation.ReadLock,
+		Waiters:          append([]storage.LockWaiter(nil), lockInformation.Waiters...),
+		WriteIntentOwner: lockInformation.WriteIntentOwner,
+		WriteIntentSince: lockInformation.WriteIntentSince,
 	}
 	var err error
 	tombstone.Version, err = nextVersion(lastVersion)
@@ -349,11 +381,11 @@ func (x *StorageLock) tryUpgrade(ctx context.Context, e *events.Event, lockId, o
 	if err != nil {
 		return err
 	}
-	now, err := x.getTime(ctx, e.Fork())
+	expires, err := x.activeLeaseExpiry(ctx, e.Fork(), info)
 	if err != nil {
 		return err
 	}
-	if info.LockCount <= 0 || !now.Before(info.LeaseExpireTime) {
+	if info.LockCount <= 0 {
 		return ErrLeaseExpired
 	}
 	if !info.ReadLock || info.ReadDepth(ownerId) <= 0 {
@@ -369,12 +401,15 @@ func (x *StorageLock) tryUpgrade(ctx context.Context, e *events.Event, lockId, o
 		return err
 	}
 	upgraded := &storage.LockInformation{
-		LockId:          lockId,
-		OwnerId:         ownerId,
-		Version:         next,
-		LockCount:       1,
-		LockBeginTime:   info.LockBeginTime,
-		LeaseExpireTime: now.Add(x.options.LeaseExpireAfter),
+		LockId:           lockId,
+		OwnerId:          ownerId,
+		Version:          next,
+		LockCount:        1,
+		LockBeginTime:    info.LockBeginTime,
+		LeaseExpireTime:  expires,
+		Waiters:          append([]storage.LockWaiter(nil), info.Waiters...),
+		WriteIntentOwner: info.WriteIntentOwner,
+		WriteIntentSince: info.WriteIntentSince,
 	}
 	if err := x.storageExecutor.UpdateWithVersion(ctx, e.Fork(), lockId, oldVersion, next, upgraded); err != nil {
 		return err
@@ -425,8 +460,13 @@ func (x *StorageLock) downgradeOnce(ctx context.Context, e *events.Event, ownerI
 		info.ReadLock = true
 		info.LockCount = 1
 		info.ReadOwners = map[string]int{ownerId: 1}
-		info.WriteIntentOwner = ""
-		info.WriteIntentSince = time.Time{}
+		// 降级没有取消写者的排队。意图为空时用队首补上，新读者仍然不能进入。
+		if info.WriteIntentOwner == "" {
+			if head := firstWriteWaiter(info.Waiters); head != nil {
+				info.WriteIntentOwner = head.OwnerId
+				info.WriteIntentSince = head.Since
+			}
+		}
 	}
 	if err := x.storageExecutor.UpdateWithVersion(ctx, e.Fork(), x.options.LockId, oldVersion, next, info); err != nil {
 		return err
@@ -474,13 +514,16 @@ func (x *StorageLock) prepareWriteOnce(ctx context.Context, e *events.Event, own
 	}
 	changed := false
 	if !info.HasWaiter(ownerId, waiterModeWrite) {
-		info.Waiters = append(info.Waiters, storage.LockWaiter{OwnerId: ownerId, Mode: waiterModeWrite, Since: now})
+		info.Waiters = append(info.Waiters, x.newWaiter(ownerId, waiterModeWrite, now))
 		changed = true
 	}
-	if info.ReadLock && info.WriteIntentOwner == "" {
-		info.WriteIntentOwner = ownerId
-		info.WriteIntentSince = now
-		changed = true
+	// 独占锁上同样留下写意图。否则降级成读锁后，新读者看不到有人在等。
+	if info.WriteIntentOwner == "" {
+		if head := firstWriteWaiter(info.Waiters); head != nil {
+			info.WriteIntentOwner = head.OwnerId
+			info.WriteIntentSince = head.Since
+			changed = true
+		}
 	}
 	if !changed {
 		return nil
@@ -555,7 +598,7 @@ func (x *StorageLock) ensureFairQueued(ctx context.Context, ownerId string) erro
 			placeholder := &storage.LockInformation{
 				LockId:  x.options.LockId,
 				Version: 1,
-				Waiters: []storage.LockWaiter{{OwnerId: ownerId, Mode: waiterModeWrite, Since: now}},
+				Waiters: []storage.LockWaiter{x.newWaiter(ownerId, waiterModeWrite, now)},
 			}
 			err = x.storageExecutor.CreateWithVersion(ctx, e.Fork(), x.options.LockId, placeholder.Version, placeholder)
 			if err == nil {
@@ -590,7 +633,7 @@ func (x *StorageLock) ensureFairQueued(ctx context.Context, ownerId string) erro
 			return versionErr
 		}
 		info.Version = next
-		info.Waiters = append(info.Waiters, storage.LockWaiter{OwnerId: ownerId, Mode: waiterModeWrite, Since: now})
+		info.Waiters = append(info.Waiters, x.newWaiter(ownerId, waiterModeWrite, now))
 		err = x.storageExecutor.UpdateWithVersion(ctx, e.Fork(), x.options.LockId, oldVersion, next, info)
 		if err == nil {
 			x.notifySubscribers(x.options.LockId, info)

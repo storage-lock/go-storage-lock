@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	go_storage "github.com/storage-lock/go-storage"
 	"github.com/golang-infrastructure/go-iterator"
+	go_storage "github.com/storage-lock/go-storage"
 )
 
 // mockIteratorForQuery 用于测试 lock_query 的 mock 迭代器
@@ -158,14 +158,15 @@ func TestListHeldLocksWithHeldItems(t *testing.T) {
 func TestCountLocksWithItems(t *testing.T) {
 	ctx := context.Background()
 
+	now := time.Now()
 	storage := &mockStorageWithList{
 		mockSubscribeStorage: newMockSubscribeStorage(),
 		listFunc: func(ctx context.Context) (iterator.Iterator[*go_storage.LockInformation], error) {
 			return &mockIteratorForQuery{
 				items: []*go_storage.LockInformation{
-					{LockId: "count-1"},
-					{LockId: "count-2"},
-					{LockId: "count-3"},
+					{LockId: "count-1", LockCount: 1, LeaseExpireTime: now.Add(time.Hour)},
+					{LockId: "count-2", LockCount: 1, LeaseExpireTime: now.Add(time.Hour)},
+					{LockId: "count-3", LockCount: 1, LeaseExpireTime: now.Add(time.Hour)},
 				},
 				index: 0,
 			}, nil

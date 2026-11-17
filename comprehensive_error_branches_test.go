@@ -84,20 +84,13 @@ func (m *mockMultiLockUnLockError) DeleteWithVersion(ctx context.Context, lockId
 
 // TestMultiLockUnLockError 测试 MultiLock UnLock 错误分支
 func TestMultiLockUnLockError(t *testing.T) {
-	ctx := context.Background()
 	storage := newMockMultiLockUnLockError()
 	lock1, _ := NewStorageLock(storage, "lock-1")
 	lock2, _ := NewStorageLock(storage, "lock-2")
 
-	ml, _ := NewMultiLock(lock1, lock2)
-
-	// 先获取锁
-	_ = ml.TryLock(ctx)
-
-	// 释放时会出错
-	err := ml.UnLock(ctx)
-	if err != nil {
-		t.Logf("MultiLock UnLock error returned: %v", err)
+	_, err := NewMultiLock("owner", lock1, lock2)
+	if !errors.Is(err, ErrAtomicMultiLockUnsupported) {
+		t.Fatalf("storage without atomic batch must be rejected, got %v", err)
 	}
 }
 

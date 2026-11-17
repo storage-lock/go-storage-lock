@@ -54,7 +54,7 @@ func TestFairLockTryLockStorageError(t *testing.T) {
 	storage := newMockStorageForFairLockTryLockError()
 	fl, _ := NewFairLock(storage, "fairlock-trylock-storage-error")
 
-	err := fl.TryLock(ctx)
+	err := fl.TryLock(ctx, "owner")
 	if err != nil {
 		t.Logf("FairLock TryLock storage error: %v", err)
 	}
@@ -180,16 +180,13 @@ func (m *mockStorageForMultiLockLockError) CreateWithVersion(ctx context.Context
 
 // TestMultiLockLockStorageError 测试 MultiLock.Lock 存储错误分支
 func TestMultiLockLockStorageError(t *testing.T) {
-	ctx := context.Background()
 	storage := newMockStorageForMultiLockLockError()
 	lock1, _ := NewStorageLock(storage, "lock1")
 	lock2, _ := NewStorageLock(storage, "lock2")
 
-	ml, _ := NewMultiLock(lock1, lock2)
-
-	err := ml.Lock(ctx)
-	if err != nil {
-		t.Logf("MultiLock Lock storage error: %v", err)
+	_, err := NewMultiLock("owner", lock1, lock2)
+	if !errors.Is(err, ErrAtomicMultiLockUnsupported) {
+		t.Fatalf("storage without atomic batch must be rejected, got %v", err)
 	}
 }
 
@@ -210,16 +207,13 @@ func (m *mockStorageForMultiLockTryLockError) CreateWithVersion(ctx context.Cont
 
 // TestMultiLockTryLockStorageError 测试 MultiLock.TryLock 存储错误分支
 func TestMultiLockTryLockStorageError(t *testing.T) {
-	ctx := context.Background()
 	storage := newMockStorageForMultiLockTryLockError()
 	lock1, _ := NewStorageLock(storage, "lock1")
 	lock2, _ := NewStorageLock(storage, "lock2")
 
-	ml, _ := NewMultiLock(lock1, lock2)
-
-	err := ml.TryLock(ctx)
-	if err != nil {
-		t.Logf("MultiLock TryLock storage error: %v", err)
+	_, err := NewMultiLock("owner", lock1, lock2)
+	if !errors.Is(err, ErrAtomicMultiLockUnsupported) {
+		t.Fatalf("storage without atomic batch must be rejected, got %v", err)
 	}
 }
 
@@ -244,19 +238,12 @@ func (m *mockStorageForMultiLockUnLockError) DeleteWithVersion(ctx context.Conte
 
 // TestMultiLockUnLockStorageError 测试 MultiLock.UnLock 存储错误分支
 func TestMultiLockUnLockStorageError(t *testing.T) {
-	ctx := context.Background()
 	storage := newMockStorageForMultiLockUnLockError()
 	lock1, _ := NewStorageLock(storage, "lock1")
 	lock2, _ := NewStorageLock(storage, "lock2")
 
-	ml, _ := NewMultiLock(lock1, lock2)
-
-	// 先获取锁
-	_ = ml.TryLock(ctx)
-
-	// 释放时出错
-	err := ml.UnLock(ctx)
-	if err != nil {
-		t.Logf("MultiLock UnLock storage error: %v", err)
+	_, err := NewMultiLock("owner", lock1, lock2)
+	if !errors.Is(err, ErrAtomicMultiLockUnsupported) {
+		t.Fatalf("storage without atomic batch must be rejected, got %v", err)
 	}
 }

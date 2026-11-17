@@ -56,7 +56,7 @@ func TestFairLockTryLockError(t *testing.T) {
 	storage := newMockFairLockTryLockError()
 	fl, _ := NewFairLock(storage, "fairlock-trylock-error")
 
-	err := fl.TryLock(ctx)
+	err := fl.TryLock(ctx, "owner")
 	if err != nil {
 		t.Logf("FairLock TryLock error returned: %v", err)
 	}

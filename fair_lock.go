@@ -3,26 +3,18 @@ package storage_lock
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	go_storage "github.com/storage-lock/go-storage"
 )
 
-// FairLock 公平锁，保证请求按 FIFO 顺序获取锁。
-// 仅支持支持"顺序语义"的存储介质（SQL、MongoDB、etcd 等）。
-// S3/OSS 等对象存储不支持公平锁。
+// FairLock 是跨进程公平锁的薄包装。
+// 公平顺序写在锁记录的等待队列里，不使用进程内队列，也不让所有调用方共用一个 owner。
+// 对象存储只要满足单 key 线性一致 CAS 就可以用；它不要求存储另有“顺序节点”。
 type FairLock struct {
-	storage go_storage.Storage
-	lockId  string
-
-	// 内部使用普通锁实现
 	lock *StorageLock
-
-	mu sync.Mutex
 }
 
-// NewFairLock 创建公平锁实例。
-// 注意：公平性依赖存储层的顺序保证能力。
+// NewFairLock 创建一把开启 Fair 的锁。owner 由每次 Lock/TryLock/UnLock 传入。
 func NewFairLock(storage go_storage.Storage, lockId string) (*FairLock, error) {
 	if storage == nil {
 		return nil, ErrStorageNil
@@ -30,70 +22,51 @@ func NewFairLock(storage go_storage.Storage, lockId string) (*FairLock, error) {
 	if lockId == "" {
 		return nil, fmt.Errorf("lockId is empty")
 	}
+	options := NewStorageLockOptionsWithLockId(lockId)
+	options.Fair = true
+	return NewFairLockWithOptions(storage, options)
+}
 
-	lock, err := NewStorageLock(storage, lockId)
+// NewFairLockWithOptions 使用调用方的配置创建公平锁，并强制打开 Fair。
+func NewFairLockWithOptions(storage go_storage.Storage, options *StorageLockOptions) (*FairLock, error) {
+	if options == nil {
+		return nil, ErrInvalidOptions
+	}
+	copied := *options
+	copied.Fair = true
+	lock, err := NewStorageLockWithOptions(storage, &copied)
 	if err != nil {
 		return nil, err
 	}
-
-	return &FairLock{
-		storage: storage,
-		lockId:  lockId,
-		lock:    lock,
-	}, nil
+	return &FairLock{lock: lock}, nil
 }
 
-// Lock 获取锁，阻塞直到成功或 ctx 取消。
-// 公平性：请求按到达顺序排队，先到先得。
-func (fl *FairLock) Lock(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	fl.mu.Lock()
-	defer fl.mu.Unlock()
-
-	// 公平锁的实现依赖存储层的队列语义
-	// 对于支持顺序节点/事务的存储（如 etcd/ZK/SQL），可以实现真正的 FIFO
-	// 对于不支持的存储，退化为普通锁
-
-	ownerId := fmt.Sprintf("fairlock-%s", fl.lockId)
+// Lock 按锁记录中的等待顺序获取。ownerId 必须是这个调用方自己的身份。
+func (fl *FairLock) Lock(ctx context.Context, ownerId string) error {
 	return fl.lock.Lock(ctx, ownerId)
 }
 
-// TryLock 非阻塞尝试获取锁。
-// 成功返回 nil，失败返回 ErrLockBusy。
-func (fl *FairLock) TryLock(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	fl.mu.Lock()
-	defer fl.mu.Unlock()
-
-	ownerId := fmt.Sprintf("fairlock-%s", fl.lockId)
+// TryLock 只尝试一次。还没轮到自己时返回 ErrNotYourTurn，不会插队。
+func (fl *FairLock) TryLock(ctx context.Context, ownerId string) error {
 	return fl.lock.TryLock(ctx, ownerId)
 }
 
-// UnLock 释放锁。
-func (fl *FairLock) UnLock(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	fl.mu.Lock()
-	defer fl.mu.Unlock()
-
-	ownerId := fmt.Sprintf("fairlock-%s", fl.lockId)
+// UnLock 释放当前 owner 持有的公平锁。
+func (fl *FairLock) UnLock(ctx context.Context, ownerId string) error {
 	return fl.lock.UnLock(ctx, ownerId)
 }
 
 // LockId 返回锁的唯一标识。
 func (fl *FairLock) LockId() string {
-	return fl.lockId
+	return fl.lock.options.LockId
 }
 
-// IsFair 返回 true，表示这是公平锁。
+// IsFair 返回 true。公平性来自存储记录里的队列，不是这个包装器自己的内存队列。
 func (fl *FairLock) IsFair() bool {
-	return true
+	return fl.lock.options.Fair
+}
+
+// StorageLock 返回被包装的锁，供需要 Inspect、Waiters 或 fencing token 的调用方使用。
+func (fl *FairLock) StorageLock() *StorageLock {
+	return fl.lock
 }

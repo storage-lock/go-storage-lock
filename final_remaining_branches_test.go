@@ -68,16 +68,12 @@ func (m *mockStorageForMultiLockRollbackError) CreateWithVersion(ctx context.Con
 
 // TestMultiLockRollbackError 测试 MultiLock.rollback 错误分支
 func TestMultiLockRollbackError(t *testing.T) {
-	ctx := context.Background()
 	storage := newMockStorageForMultiLockRollbackError()
 	lock1, _ := NewStorageLock(storage, "lock1")
 	lock2, _ := NewStorageLock(storage, "lock2")
 
-	ml, _ := NewMultiLock(lock1, lock2)
-
-	// 尝试获取锁会失败，触发 rollback
-	err := ml.Lock(ctx)
-	if err != nil {
-		t.Logf("MultiLock Lock with rollback error: %v", err)
+	_, err := NewMultiLock("owner", lock1, lock2)
+	if !errors.Is(err, ErrAtomicMultiLockUnsupported) {
+		t.Fatalf("storage without atomic batch must be rejected, got %v", err)
 	}
 }

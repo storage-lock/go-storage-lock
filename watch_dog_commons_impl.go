@@ -49,6 +49,12 @@ type WatchDogCommonsImpl struct {
 	// 存储调用立刻返回，goroutine 迅速从 refreshLeaseExpiredTime 返回并在下次 select 命中 stop 退出。
 	runCtx    context.Context
 	runCancel context.CancelFunc
+
+	// holdLost 在同一次持有已经通知失锁后置位。后续刷新看到它就不再写租约。
+	holdLost atomic.Bool
+	// knownExpiry 是上次确认仍属于本次持有的到期时刻，和租约使用同一个时间源。
+	expiryMu    sync.Mutex
+	knownExpiry time.Time
 }
 
 // WatchDogIDPrefix 看门狗协程分配的ID
@@ -150,14 +156,21 @@ func (x *WatchDogCommonsImpl) Start(ctx context.Context) error {
 				AddPayload(PayloadRefreshSuccessCount, refreshSuccessCount)
 			x.e.Load().Fork().AddAction(refreshBeginAction).Publish(context.Background())
 
-			// 调用刷新的方法进行一次刷新
+			// 调用刷新的方法进行一次刷新。
+			// 到期却无法再延长、或连续失败直到已知到期时刻，都在 refreshOnce 里通知一次并停止。
+			// 这里只保留被接管、记录消失时的通知，以及正常释放时的安静退出。
 			refreshBeginTime := time.Now()
-			err := x.refreshLeaseExpiredTime()
+			err := x.refreshOnce()
 			if err != nil {
 				continueErrorCount++
 
-				// 如果锁已经不是自己持有了，则退出
-				if errors.Is(err, ErrLockNotBelongYou) || errors.Is(err, ErrLeaseExpired) || errors.Is(err, ErrLockNotFound) {
+				// 墓碑路径和已经通知过的失锁都会先 stopInternal。
+				// isRunning 为 false 时安静退出，避免同一次持有通知两次。
+				if errors.Is(err, ErrLockNotBelongYou) || errors.Is(err, ErrLockNotFound) ||
+					(errors.Is(err, ErrLeaseExpired) && !x.isRunning.Load()) {
+					if errors.Is(err, ErrLeaseExpired) && !x.isRunning.Load() {
+						return
+					}
 					notLockOwnerAction := events.NewAction(ActionNotLockOwner).
 						AddPayload(PayloadContinueErrorCount, continueErrorCount).
 						AddPayload(PayloadRefreshSuccessCount, refreshSuccessCount).
@@ -264,9 +277,21 @@ func (x *WatchDogCommonsImpl) refreshLeaseExpiredTime() error {
 		return err
 	}
 
-	// 锁已经不是自己持有了，则直接退出，每个续租狗狗都是很忠贞的只为一个owner续租，并不会进行协程复用
-	if information.OwnerId != x.ownerId {
-		// 试图刷新不是自己的锁
+	// 共享读锁的 OwnerId 会被后加入的读者改写。只要自己还在持有者集合里，
+	// 这次改写不是丢失；集合里已经没有自己，才停止续租。
+	if information.ReadLock {
+		if information.LockCount <= 0 || information.ReadDepth(x.ownerId) <= 0 {
+			refreshEvent.AddAction(events.NewAction(ActionNotLockOwner).AddPayload(storage_events.PayloadLockInformation, information)).
+				AddActionByName(ActionWatchDogStop).
+				Publish(ctx)
+			if information.LockCount <= 0 {
+				x.stopInternal()
+				return ErrLeaseExpired
+			}
+			return ErrLockNotBelongYou
+		}
+	} else if information.OwnerId != x.ownerId {
+		// 独占锁仍只认记录上的单个持有者。
 		refreshEvent.AddAction(events.NewAction(ActionNotLockOwner).AddPayload(storage_events.PayloadLockInformation, information)).
 			AddActionByName(ActionWatchDogStop).
 			Publish(ctx)
@@ -278,26 +303,27 @@ func (x *WatchDogCommonsImpl) refreshLeaseExpiredTime() error {
 		return ErrLeaseExpired
 	}
 
-	if _, err := x.storageLock.activeLeaseExpiry(ctx, refreshEvent.Fork(), information); err != nil {
-		refreshEvent.AddAction(events.NewAction(ActionWatchDogStop).SetErr(err)).Publish(ctx)
-		x.stopInternal()
-		return err
-	}
-
-	// 计算租约续租之后的过期时间，这里计算的时候需要使用到Storage中统一时间源
-	expireTime, err := x.storageLock.getLeaseExpireTime(ctx, refreshEvent.Fork())
+	// 与公开续租共用一次计算：仍早于到期才续，新的到期时刻不得早于原值。
+	expires, err := x.storageLock.activeLeaseExpiry(ctx, refreshEvent.Fork(), information)
 	if err != nil {
+		// 时间已经到点，但记录还是自己的。不写回，也不在这里停止。
+		// 能否通知由 refreshOnce 按已知到期时刻决定。
+		if errors.Is(err, ErrLeaseExpired) {
+			refreshEvent.Publish(ctx)
+			return err
+		}
+		// 时间源失败是临时故障：不改记录，不停后续刷新，也不在这里通知丢失。
 		refreshEvent.AddAction(events.NewAction(ActionGetLeaseExpireTimeError).SetErr(err)).Publish(ctx)
 		return err
 	}
-	information.LeaseExpireTime = expireTime
+	information.LeaseExpireTime = expires
 
 	// 续租算作是一次修改，所以版本号要加一
 	lastVersion := information.Version
 	nextVersion, err := nextVersion(lastVersion)
 	if err != nil {
-		refreshEvent.AddAction(events.NewAction(ActionWatchDogStop).SetErr(err)).Publish(ctx)
-		x.stopInternal()
+		// 版本耗尽同样先继续观察。记录被删除或被人抢走时，下一轮再通知。
+		refreshEvent.AddAction(events.NewAction(ActionWatchDogRefreshError).SetErr(err)).Publish(ctx)
 		return err
 	}
 	information.Version = nextVersion

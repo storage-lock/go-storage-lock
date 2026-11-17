@@ -89,7 +89,7 @@ func TestLeaderElectionObserveMultipleTimes(t *testing.T) {
 // ==================== MultiLock 补充测试 ====================
 
 func TestMultiLockNewWithEmptyLocks(t *testing.T) {
-	_, err := NewMultiLock()
+	_, err := NewMultiLock("owner")
 	if err == nil {
 		t.Fatal("expected error for empty locks")
 	}
@@ -99,7 +99,7 @@ func TestMultiLockNewWithNilLock(t *testing.T) {
 	storage := newMockSubscribeStorage()
 	lock1, _ := NewStorageLock(storage, "lock-1")
 
-	_, err := NewMultiLock(lock1, nil)
+	_, err := NewMultiLock("owner", lock1, nil)
 	if err == nil {
 		t.Fatal("expected error for nil lock")
 	}
@@ -109,7 +109,7 @@ func TestMultiLockNewWithDuplicateLocks(t *testing.T) {
 	storage := newMockSubscribeStorage()
 	lock1, _ := NewStorageLock(storage, "dup-lock")
 
-	_, err := NewMultiLock(lock1, lock1)
+	_, err := NewMultiLock("owner", lock1, lock1)
 	if err == nil {
 		t.Fatal("expected error for duplicate locks")
 	}
@@ -123,9 +123,16 @@ func TestMultiLockLockWithCancelledContext(t *testing.T) {
 	lock1, _ := NewStorageLock(storage, "cancel-lock-1")
 	lock2, _ := NewStorageLock(storage, "cancel-lock-2")
 
-	multiLock, _ := NewMultiLock(lock1, lock2)
+	multiLock, err := NewMultiLock("owner", lock1, lock2)
+	if err != nil {
+		if !errors.Is(err, ErrAtomicMultiLockUnsupported) {
+			t.Fatalf("storage without atomic batch must be rejected, got %v", err)
+		}
+		return
+	}
+	_ = multiLock
 
-	err := multiLock.Lock(ctx)
+	err = multiLock.Lock(ctx)
 	if err == nil {
 		t.Fatal("expected error for cancelled context")
 	}
@@ -138,9 +145,16 @@ func TestMultiLockTryLockWithCancelledContext(t *testing.T) {
 	storage := newMockSubscribeStorage()
 	lock1, _ := NewStorageLock(storage, "try-cancel-lock-1")
 
-	multiLock, _ := NewMultiLock(lock1)
+	multiLock, err := NewMultiLock("owner", lock1)
+	if err != nil {
+		if !errors.Is(err, ErrAtomicMultiLockUnsupported) {
+			t.Fatalf("storage without atomic batch must be rejected, got %v", err)
+		}
+		return
+	}
+	_ = multiLock
 
-	err := multiLock.TryLock(ctx)
+	err = multiLock.TryLock(ctx)
 	if err == nil {
 		t.Fatal("expected error for cancelled context")
 	}
@@ -151,10 +165,17 @@ func TestMultiLockUnLockWhenNotHeld(t *testing.T) {
 	storage := newMockSubscribeStorage()
 	lock1, _ := NewStorageLock(storage, "unlock-not-held")
 
-	multiLock, _ := NewMultiLock(lock1)
+	multiLock, err := NewMultiLock("owner", lock1)
+	if err != nil {
+		if !errors.Is(err, ErrAtomicMultiLockUnsupported) {
+			t.Fatalf("storage without atomic batch must be rejected, got %v", err)
+		}
+		return
+	}
+	_ = multiLock
 
 	// 没有获取锁就释放，应该无操作
-	err := multiLock.UnLock(ctx)
+	err = multiLock.UnLock(ctx)
 	if err != nil {
 		t.Fatalf("UnLock when not held should not error, got: %v", err)
 	}
@@ -166,10 +187,17 @@ func TestMultiLockUnLockPartialFailure(t *testing.T) {
 	lock1, _ := NewStorageLock(storage, "partial-fail-1")
 	lock2, _ := NewStorageLock(storage, "partial-fail-2")
 
-	multiLock, _ := NewMultiLock(lock1, lock2)
+	multiLock, err := NewMultiLock("owner", lock1, lock2)
+	if err != nil {
+		if !errors.Is(err, ErrAtomicMultiLockUnsupported) {
+			t.Fatalf("storage without atomic batch must be rejected, got %v", err)
+		}
+		return
+	}
+	_ = multiLock
 
 	// 获取锁
-	err := multiLock.Lock(ctx)
+	err = multiLock.Lock(ctx)
 	if err != nil {
 		t.Fatalf("Lock error: %v", err)
 	}
@@ -187,7 +215,14 @@ func TestMultiLockLockIds(t *testing.T) {
 	lock1, _ := NewStorageLock(storage, "ids-lock-1")
 	lock2, _ := NewStorageLock(storage, "ids-lock-2")
 
-	multiLock, _ := NewMultiLock(lock1, lock2)
+	multiLock, err := NewMultiLock("owner", lock1, lock2)
+	if err != nil {
+		if !errors.Is(err, ErrAtomicMultiLockUnsupported) {
+			t.Fatalf("storage without atomic batch must be rejected, got %v", err)
+		}
+		return
+	}
+	_ = multiLock
 
 	ids := multiLock.LockIds()
 	if len(ids) != 2 {
@@ -226,12 +261,12 @@ func TestFairLockTryLock(t *testing.T) {
 	fairLock, _ := NewFairLock(storage, "fair-try-lock")
 
 	// TryLock 应该能调用
-	err := fairLock.TryLock(ctx)
+	err := fairLock.TryLock(ctx, "owner")
 	// 简化实现，验证 API 可用
 	_ = err
 
 	// 清理
-	fairLock.UnLock(ctx)
+	fairLock.UnLock(ctx, "owner")
 }
 
 func TestFairLockLockWithCancelledContext(t *testing.T) {
@@ -241,7 +276,7 @@ func TestFairLockLockWithCancelledContext(t *testing.T) {
 	storage := newMockSubscribeStorage()
 	fairLock, _ := NewFairLock(storage, "fair-cancel")
 
-	err := fairLock.Lock(ctx)
+	err := fairLock.Lock(ctx, "owner")
 	if err == nil {
 		t.Fatal("expected error for cancelled context")
 	}
@@ -254,7 +289,7 @@ func TestFairLockUnLockWithCancelledContext(t *testing.T) {
 	storage := newMockSubscribeStorage()
 	fairLock, _ := NewFairLock(storage, "fair-unlock-cancel")
 
-	err := fairLock.UnLock(ctx)
+	err := fairLock.UnLock(ctx, "owner")
 	if err == nil {
 		t.Fatal("expected error for cancelled context")
 	}
@@ -397,7 +432,14 @@ func TestMultiLockRollbackWithError(t *testing.T) {
 	storage := newMockSubscribeStorage()
 	lock1, _ := NewStorageLock(storage, "rollback-error-1")
 
-	multiLock, _ := NewMultiLock(lock1)
+	multiLock, err := NewMultiLock("owner", lock1)
+	if err != nil {
+		if !errors.Is(err, ErrAtomicMultiLockUnsupported) {
+			t.Fatalf("storage without atomic batch must be rejected, got %v", err)
+		}
+		return
+	}
+	_ = multiLock
 
 	// 模拟获取失败后的回滚
 	// 通过直接调用内部方法测试（简化实现中 rollback 是私有方法）
@@ -433,7 +475,14 @@ func TestMultiLockConcurrentLock(t *testing.T) {
 	storage := newMockSubscribeStorage()
 	lock1, _ := NewStorageLock(storage, "concurrent-lock-1")
 
-	multiLock, _ := NewMultiLock(lock1)
+	multiLock, err := NewMultiLock("owner", lock1)
+	if err != nil {
+		if !errors.Is(err, ErrAtomicMultiLockUnsupported) {
+			t.Fatalf("storage without atomic batch must be rejected, got %v", err)
+		}
+		return
+	}
+	_ = multiLock
 
 	// 并发尝试获取锁
 	done := make(chan bool)
@@ -456,10 +505,17 @@ func TestMultiLockErrorWrapping(t *testing.T) {
 	storage := newMockSubscribeStorage()
 	lock1, _ := NewStorageLock(storage, "error-wrap-1")
 
-	multiLock, _ := NewMultiLock(lock1)
+	multiLock, err := NewMultiLock("owner", lock1)
+	if err != nil {
+		if !errors.Is(err, ErrAtomicMultiLockUnsupported) {
+			t.Fatalf("storage without atomic batch must be rejected, got %v", err)
+		}
+		return
+	}
+	_ = multiLock
 
 	// 尝试在已持有时再次获取
-	err := multiLock.Lock(context.Background())
+	err = multiLock.Lock(context.Background())
 	if err != nil {
 		t.Fatalf("Lock error: %v", err)
 	}
@@ -485,10 +541,17 @@ func TestMultiLockRollbackPath(t *testing.T) {
 	lock1, _ := NewStorageLock(storage, "rollback-path-1")
 	lock2, _ := NewStorageLock(storage, "rollback-path-2")
 
-	multiLock, _ := NewMultiLock(lock1, lock2)
+	multiLock, err := NewMultiLock("owner", lock1, lock2)
+	if err != nil {
+		if !errors.Is(err, ErrAtomicMultiLockUnsupported) {
+			t.Fatalf("storage without atomic batch must be rejected, got %v", err)
+		}
+		return
+	}
+	_ = multiLock
 
 	// 先手动获取第一个锁
-	err := lock1.Lock(ctx, "owner-1")
+	err = lock1.Lock(ctx, "owner-1")
 	if err != nil {
 		t.Fatalf("First lock error: %v", err)
 	}

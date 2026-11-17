@@ -114,8 +114,8 @@ func TestWaitersVisibleWhileBlocked(t *testing.T) {
 		_ = lock.WLock(ctx, "waiting-writer")
 	}()
 	require.Eventually(t, func() bool {
-		waiters, err := lock.Waiters(ctx)
-		return err == nil && len(waiters) == 1 && waiters[0].OwnerId == "waiting-writer" && waiters[0].Mode == "write"
+		status, err := lock.Inspect(ctx)
+		return err == nil && len(status.Waiters) == 1 && status.Waiters[0].OwnerId == "waiting-writer" && status.Waiters[0].Mode == "write"
 	}, time.Second, 10*time.Millisecond)
 
 	status, err := lock.Inspect(ctx)
@@ -177,7 +177,7 @@ func TestFairLockQueueLength(t *testing.T) {
 }
 
 func TestLockLostCancelsWithLock(t *testing.T) {
-	lock, _, clock := testRWStorageLock(t, "lock-lost-with")
+	lock, store, clock := testRWStorageLock(t, "lock-lost-with")
 	ctx := context.Background()
 	started := make(chan struct{})
 	done := make(chan error, 1)
@@ -194,6 +194,13 @@ func TestLockLostCancelsWithLock(t *testing.T) {
 		t.Fatal("callback did not start")
 	}
 	clock.Advance(lock.options.LeaseExpireAfter + time.Second)
+	other, err := NewStorageLockWithOptions(store, NewStorageLockOptionsWithLockId("lock-lost-with").
+		SetTimeProvider(clock).
+		SetLeaseExpireAfter(5*time.Minute).
+		SetDisableWatchDog(true).
+		SetVersionMissRetryInterval(10*time.Millisecond))
+	require.NoError(t, err)
+	require.NoError(t, other.Lock(ctx, "other"))
 	select {
 	case err := <-done:
 		require.ErrorIs(t, err, ErrLockLost)
@@ -203,13 +210,20 @@ func TestLockLostCancelsWithLock(t *testing.T) {
 }
 
 func TestBeginLeaseCancelsOnLoss(t *testing.T) {
-	lock, _, clock := testRWStorageLock(t, "begin-lease")
+	lock, store, clock := testRWStorageLock(t, "begin-lease")
 	lock.options.LeaseRefreshInterval = 30 * time.Millisecond
 	owned, stop, err := lock.BeginLease(context.Background(), "owner")
 	require.NoError(t, err)
 	defer stop()
 	time.Sleep(150 * time.Millisecond)
 	clock.Advance(lock.options.LeaseExpireAfter + time.Second)
+	other, err := NewStorageLockWithOptions(store, NewStorageLockOptionsWithLockId("begin-lease").
+		SetTimeProvider(clock).
+		SetLeaseExpireAfter(5*time.Minute).
+		SetDisableWatchDog(true).
+		SetVersionMissRetryInterval(10*time.Millisecond))
+	require.NoError(t, err)
+	require.NoError(t, other.Lock(context.Background(), "other"))
 	select {
 	case <-owned.Done():
 		require.ErrorIs(t, context.Cause(owned), ErrLockLost)
@@ -218,7 +232,7 @@ func TestBeginLeaseCancelsOnLoss(t *testing.T) {
 	}
 	status, err := lock.Inspect(context.Background())
 	require.NoError(t, err)
-	assert.False(t, status.Held, "丢失后租约不得继续有效")
+	require.Equal(t, "other", status.Information.OwnerId)
 }
 
 func TestUpgradeRejectsNonReader(t *testing.T) {

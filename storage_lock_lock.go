@@ -89,7 +89,7 @@ func (x *StorageLock) Lock(ctx context.Context, ownerId string) error {
 		// 然后休眠一下再开始重新抢占锁
 		sleepDuration := x.options.VersionMissRetryInterval + x.retryIntervalRandomBase()
 		e.Fork().AddAction(events.NewAction(ActionSleep).AddPayload(PayloadSleep, sleepDuration)).Publish(ctx)
-		if err := waitContext(ctx, sleepDuration); err != nil {
+		if err := x.waitBeforeRetry(ctx, ownerId, waiterModeWrite, sleepDuration); err != nil {
 			if x.options.Fair {
 				x.abandonWait(ownerId, waiterModeWrite)
 			}
@@ -112,7 +112,8 @@ func (x *StorageLock) TryLock(ctx context.Context, ownerId string) error {
 	e.AddActionByName(ActionLockBegin).Publish(ctx)
 	defer e.Fork().AddActionByName(ActionLockFinish).Publish(ctx)
 	err := x.tryLock(ctx, e.Fork(), x.options.LockId, ownerId)
-	if errors.Is(err, ErrVersionMiss) || errors.Is(err, ErrLockAlreadyExists) || errors.Is(err, ErrNotYourTurn) {
+	// 公平获取还没轮到自己时把 ErrNotYourTurn 原样返回。其它竞争失败仍是忙。
+	if errors.Is(err, ErrVersionMiss) || errors.Is(err, ErrLockAlreadyExists) || (errors.Is(err, ErrNotYourTurn) && !x.options.Fair) {
 		err = ErrLockBusy
 	}
 	if err == nil {
@@ -186,6 +187,9 @@ func (x *StorageLock) lockExists(ctx context.Context, e *events.Event, lockId, o
 
 // 尝试抢占已经过期的锁
 func (x *StorageLock) lockExpired(ctx context.Context, e *events.Event, lockId, ownerId string, storageTime time.Time, information *storage.LockInformation) error {
+	if err := x.dropExpiredWaiters(ctx, e, information, storageTime); err != nil {
+		return err
+	}
 	version, err := nextVersion(information.Version)
 	if err != nil {
 		return err

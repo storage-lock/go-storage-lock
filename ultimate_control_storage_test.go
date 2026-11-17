@@ -199,7 +199,7 @@ func TestUltimateControl(t *testing.T) {
 		lock1, _ := NewStorageLock(storage, "lock1")
 		lock2, _ := NewStorageLock(storage, "lock2")
 
-		_, err := NewMultiLock(lock1, lock2)
+		_, err := NewMultiLock("owner", lock1, lock2)
 		if err != nil {
 			t.Logf("MultiLock error: %v", err)
 		}

@@ -6,34 +6,26 @@ on:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ['1.23.x', '1.25.x']
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: go-storage-lock
-
-      # 兄弟仓库 go-events 未发布本仓库依赖的新 API，用本地 replace 指向平级目录
-      - name: Checkout go-events
-        uses: actions/checkout@v4
-        with:
-          repository: storage-lock/go-events
-          path: go-events
-          ref: main
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: ${{ matrix.go-version }}
 
+      # 只用 go.mod 里声明的已发布依赖构建，与下游 go get 拿到的形态一致。
+      # 不再 checkout 兄弟仓库，避免 CI 依赖未发布的 sibling 源码。
       - name: Build
-        working-directory: go-storage-lock
         run: go build ./...
 
       - name: Vet
-        working-directory: go-storage-lock
         run: go vet ./...
 
       - name: Test
-        working-directory: go-storage-lock
         run: go test -race ./...

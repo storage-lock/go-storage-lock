@@ -204,6 +204,13 @@ func (x *StorageLock) stopWatchDog(ctx context.Context, e *events.Event, lockInf
 	stopLastWatchDogEvent.Publish(ctx)
 }
 
+// hasWatchDog 报告这个实例是否已经有看门狗。读锁重入不能把原持有者的看门狗换掉。
+func (x *StorageLock) hasWatchDog() bool {
+	x.watchDogMu.Lock()
+	defer x.watchDogMu.Unlock()
+	return x.storageLockWatchDog != nil
+}
+
 // setWatchDog 设置看门狗，带互斥锁保护
 func (x *StorageLock) setWatchDog(watchDog WatchDog) {
 	x.watchDogMu.Lock()

@@ -2,6 +2,7 @@ package storage_lock
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -129,60 +130,23 @@ func TestLeaderElectionLeader(t *testing.T) {
 }
 
 func TestMultiLockBasic(t *testing.T) {
-	ctx := context.Background()
 	storage := newMockSubscribeStorage()
-
 	lock1, _ := NewStorageLock(storage, "lock-1")
 	lock2, _ := NewStorageLock(storage, "lock-2")
-
-	multiLock, err := NewMultiLock(lock1, lock2)
-	if err != nil {
-		t.Fatalf("NewMultiLock error: %v", err)
-	}
-
-	// 获取所有锁
-	err = multiLock.Lock(ctx)
-	if err != nil {
-		t.Fatalf("MultiLock.Lock error: %v", err)
-	}
-
-	if multiLock.HeldCount() != 2 {
-		t.Fatalf("expected 2 held locks, got %d", multiLock.HeldCount())
-	}
-
-	// 释放所有锁
-	err = multiLock.UnLock(ctx)
-	if err != nil {
-		t.Fatalf("MultiLock.UnLock error: %v", err)
-	}
-
-	if multiLock.HeldCount() != 0 {
-		t.Fatalf("expected 0 held locks after unlock, got %d", multiLock.HeldCount())
+	_, err := NewMultiLock("owner", lock1, lock2)
+	if !errors.Is(err, ErrAtomicMultiLockUnsupported) {
+		t.Fatalf("storage without atomic batch must be rejected, got %v", err)
 	}
 }
 
 func TestMultiLockTryLock(t *testing.T) {
-	ctx := context.Background()
 	storage := newMockSubscribeStorage()
-
 	lock1, _ := NewStorageLock(storage, "try-lock-1")
 	lock2, _ := NewStorageLock(storage, "try-lock-2")
-
-	multiLock, _ := NewMultiLock(lock1, lock2)
-
-	// 非阻塞获取
-	err := multiLock.TryLock(ctx)
-	if err != nil {
-		t.Fatalf("MultiLock.TryLock error: %v", err)
+	_, err := NewMultiLock("owner", lock1, lock2)
+	if !errors.Is(err, ErrAtomicMultiLockUnsupported) {
+		t.Fatalf("storage without atomic batch must be rejected, got %v", err)
 	}
-
-	// 第二次 TryLock 应该失败（已被持有）
-	err = multiLock.TryLock(ctx)
-	if err == nil {
-		t.Fatal("expected TryLock to fail when already held")
-	}
-
-	multiLock.UnLock(ctx)
 }
 
 func TestFairLockBasic(t *testing.T) {
@@ -203,13 +167,13 @@ func TestFairLockBasic(t *testing.T) {
 	}
 
 	// 获取锁
-	err = fairLock.Lock(ctx)
+	err = fairLock.Lock(ctx, "owner")
 	if err != nil {
 		t.Fatalf("FairLock.Lock error: %v", err)
 	}
 
 	// 释放锁
-	err = fairLock.UnLock(ctx)
+	err = fairLock.UnLock(ctx, "owner")
 	if err != nil {
 		t.Fatalf("FairLock.UnLock error: %v", err)
 	}

@@ -62,7 +62,9 @@ func (x *StorageLock) IsLocked(ctx context.Context) (bool, error) {
 	return status.Held, nil
 }
 
-// GetOwner 返回当前有效持有者。未持有或记录不存在时返回 ErrLockNotFound。
+// GetOwner 返回当前有效的独占持有者。
+// 未持有或记录不存在时返回 ErrLockNotFound。
+// 有效共享读锁返回 ErrLockNotBelongYou，不把最后一次条件写留下的 OwnerId 当成独占持有者。
 func (x *StorageLock) GetOwner(ctx context.Context) (string, error) {
 	status, err := x.Inspect(ctx)
 	if err != nil {
@@ -70,6 +72,9 @@ func (x *StorageLock) GetOwner(ctx context.Context) (string, error) {
 	}
 	if !status.Held {
 		return "", ErrLockNotFound
+	}
+	if status.Information.ReadLock {
+		return "", ErrLockNotBelongYou
 	}
 	return status.Information.OwnerId, nil
 }
@@ -93,9 +98,9 @@ func (x *StorageLock) TTL(ctx context.Context, ownerId string) (time.Duration, e
 	return status.RemainingLease, nil
 }
 
-// Renew 延长当前独占锁的租约，不改变重入深度。
-// 只为仍有效且属于 ownerId 的租约续期；已过期的租约必须重新获取。
-// CAS 冲突会等待后重试，等待可通过 ctx 取消。可配合 DisableWatchDog 手动管理租期。
+// Renew 延长当前持有者的租约，不改变重入深度，也不改变锁的种类。
+// 独占锁只认 OwnerId。共享读锁认的是仍在持有者集合里的读者，不是最后一次写下的 OwnerId。
+// 已过期的租约必须重新获取。CAS 冲突会等待后重试，等待可通过 ctx 取消。
 func (x *StorageLock) Renew(ctx context.Context, ownerId string) error {
 	if err := validateOwner(ctx, ownerId); err != nil {
 		return err
@@ -112,7 +117,8 @@ func (x *StorageLock) Renew(ctx context.Context, ownerId string) error {
 	}
 }
 
-// allowRead 保留现有共享读锁看门狗的行为；公开租约管理 API 仅支持独占锁。
+// allowRead 为真时，OwnerId 仍匹配的旧读记录也可以续租。
+// 公开 Renew 传入 false，共享读锁只认持有者集合里的读者。
 func (x *StorageLock) renewOnce(ctx context.Context, e *events.Event, ownerId string, allowRead bool) error {
 	if err := validateOwner(ctx, ownerId); err != nil {
 		return err
@@ -124,7 +130,11 @@ func (x *StorageLock) renewOnce(ctx context.Context, e *events.Event, ownerId st
 	if info.LockCount <= 0 {
 		return ErrLockNotFound
 	}
-	if info.OwnerId != ownerId || (info.ReadLock && !allowRead) {
+	if info.ReadLock {
+		if info.ReadDepth(ownerId) <= 0 && !(allowRead && info.OwnerId == ownerId) {
+			return ErrLockNotBelongYou
+		}
+	} else if info.OwnerId != ownerId {
 		return ErrLockNotBelongYou
 	}
 	expires, err := x.activeLeaseExpiry(ctx, e.Fork(), info)
@@ -215,11 +225,23 @@ func (x *StorageLock) cleanupContext(ctx context.Context) (context.Context, cont
 	return context.WithTimeout(context.WithoutCancel(ctx), timeout)
 }
 
-// Waiters 返回当前等待队列的副本。记录不存在时返回 ErrLockNotFound。
+// Waiters 返回当前有效独占锁的等待队列副本，不延长租约。
+// 记录不存在或已释放返回 ErrLockNotFound，共享读锁返回 ErrLockNotBelongYou，
+// 租约已到点返回 ErrLeaseExpired。
 func (x *StorageLock) Waiters(ctx context.Context) ([]storage.LockWaiter, error) {
 	status, err := x.Inspect(ctx)
 	if err != nil {
 		return nil, err
+	}
+	info := &status.Information
+	if info.LockCount <= 0 {
+		return nil, ErrLockNotFound
+	}
+	if info.ReadLock {
+		return nil, ErrLockNotBelongYou
+	}
+	if !status.Held {
+		return nil, ErrLeaseExpired
 	}
 	return status.Waiters, nil
 }

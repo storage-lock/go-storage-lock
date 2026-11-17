@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	go_storage "github.com/storage-lock/go-storage"
 	"github.com/golang-infrastructure/go-iterator"
+	go_storage "github.com/storage-lock/go-storage"
 )
 
 // ListLocks 列出所有锁的信息。
@@ -81,9 +81,9 @@ func (h *heldFilterIterator) Value() *go_storage.LockInformation {
 	return h.iter.Value()
 }
 
-// CountLocks 统计锁的数量（需要遍历迭代器）。
+// CountLocks 统计当前仍被持有的锁数量，与 ListHeldLocks 列出的条数一致。
 func CountLocks(ctx context.Context, storage go_storage.Storage, prefix string) (int, error) {
-	iter, err := ListLocks(ctx, storage, prefix)
+	iter, err := ListHeldLocks(ctx, storage, prefix)
 	if err != nil {
 		return 0, err
 	}

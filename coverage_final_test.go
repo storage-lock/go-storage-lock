@@ -757,7 +757,8 @@ func TestCoverageLastBranches(t *testing.T) {
 	}
 
 	base := time.Now()
-	watchClock := &sequencedTimeProvider{times: []time.Time{base, base.Add(time.Second)}, errAt: 3}
+	// 获取锁用掉第一次读时钟，看门狗续租只再读一次。错误落在这一次上。
+	watchClock := &sequencedTimeProvider{times: []time.Time{base, base.Add(time.Second)}, errAt: 2}
 	watchLock, err := NewStorageLockWithOptions(newMockSubscribeStorage(), testOptions("watch-clock").SetTimeProvider(watchClock))
 	if err != nil {
 		t.Fatal(err)
@@ -767,6 +768,7 @@ func TestCoverageLastBranches(t *testing.T) {
 	}
 	dog := NewWatchDogCommonsImpl(ctx, events.NewEvent("watch-clock"), watchLock, "owner")
 	dog.runCtx = ctx
+	dog.stop = make(chan struct{})
 	if err := dog.refreshLeaseExpiredTime(); err == nil || !strings.Contains(err.Error(), "late clock") {
 		t.Fatalf("watchdog clock=%v", err)
 	}

@@ -22,6 +22,10 @@ type mockSubscribeStorage struct {
 	// 直接向这里推送事件，模拟"其它进程修改了存储，本进程通过存储原生能力感知到"，
 	// 而不经过本 StorageLock 实例自己的 Lock/RLock/WLock/UnLock 调用路径。
 	watchSubs map[string][]chan *storage.LockInformation
+
+	// emitWatch 为真时，成功的条件写会向当前 Watch 订阅者推送一条变更。
+	// 默认关闭，避免和只依赖 PushWatchEvent 的订阅测试重复计数。
+	emitWatch bool
 }
 
 func newMockSubscribeStorage() *mockSubscribeStorage {
@@ -85,6 +89,7 @@ func (m *mockSubscribeStorage) CreateWithVersion(ctx context.Context, lockId str
 	}
 	information.Version = version
 	m.data[lockId] = information
+	m.notifyWatchLocked(lockId, information)
 	return nil
 }
 
@@ -100,7 +105,22 @@ func (m *mockSubscribeStorage) UpdateWithVersion(ctx context.Context, lockId str
 	}
 	information.Version = newVersion
 	m.data[lockId] = information
+	m.notifyWatchLocked(lockId, information)
 	return nil
+}
+
+// notifyWatchLocked 在已持有 m.mu 时，把一次成功写入推给当前订阅者。
+// 发送不阻塞：订阅者还没开始接收时，这条通知可以丢掉，调用方仍按间隔重试。
+func (m *mockSubscribeStorage) notifyWatchLocked(lockId string, info *storage.LockInformation) {
+	if !m.emitWatch {
+		return
+	}
+	for _, ch := range m.watchSubs[lockId] {
+		select {
+		case ch <- info:
+		default:
+		}
+	}
 }
 
 func (m *mockSubscribeStorage) DeleteWithVersion(ctx context.Context, lockId string, version storage.Version, information *storage.LockInformation) error {
@@ -138,7 +158,20 @@ func (m *mockSubscribeStorage) GetTime(ctx context.Context) (time.Time, error) {
 }
 
 func (m *mockSubscribeStorage) List(ctx context.Context) (iterator.Iterator[*storage.LockInformation], error) {
-	return &emptyLockIterator{}, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	items := make([]*storage.LockInformation, 0, len(m.data))
+	for _, info := range m.data {
+		if info == nil {
+			continue
+		}
+		cloned, err := storage.LockInformationFromJsonString(info.ToJsonString())
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, cloned)
+	}
+	return iterator.FromSlice(items), nil
 }
 
 type emptyLockIterator struct{}
@@ -168,6 +201,13 @@ func (m *mockSubscribeTimeProvider) Advance(d time.Duration) {
 	defer m.mu.Unlock()
 	m.now = m.now.Add(d)
 }
+
+func (m *mockSubscribeTimeProvider) Set(t time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.now = t
+}
+
 // testSubscribeStorageLock 用 mock 存储创建用于订阅测试的 StorageLock。
 func testSubscribeStorageLock(t *testing.T, lockId string) (*StorageLock, *mockSubscribeStorage, *mockSubscribeTimeProvider) {
 	t.Helper()
